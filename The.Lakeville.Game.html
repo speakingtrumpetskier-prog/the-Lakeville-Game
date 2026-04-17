@@ -74,15 +74,18 @@
   }
   #healthText { font-size:12px; margin-top:3px; color:#cfe9d5; }
 
-  #evidenceWrap {
-    position:absolute; right:22px; bottom:22px; width:280px;
+  #controlsHud {
+    position:absolute; right:22px; bottom:22px; width:260px;
     font-family: "Consolas","Courier New",monospace;
     text-align:right;
+    pointer-events:none;
   }
-  #evidenceWrap .label { font-size:11px; letter-spacing:2px; color:#9fc8a7; margin-bottom:4px; }
-  #evidenceList { font-size:12px; color:#cfe9d5; line-height:1.5; }
-  .ev-line { opacity:0.4; }
-  .ev-line.got { opacity:1; color:#8ee39c; }
+  #controlsHud .label { font-size:11px; letter-spacing:2px; color:#9fc8a7; margin-bottom:6px; }
+  #controlsHud table { width:100%; border-collapse:collapse; font-size:11px; }
+  #controlsHud td { padding:2px 0; vertical-align:middle; line-height:1.25; }
+  #controlsHud td.key { width:90px; color:#8ee39c; text-align:right; padding-right:10px;
+    letter-spacing:1px; font-weight:600; }
+  #controlsHud td.desc { color:#9fc8a7; text-align:right; opacity:0.8; }
 
   #objective {
     position:absolute; left:50%; top:22px; transform:translateX(-50%);
@@ -367,9 +370,19 @@
     <div id="healthBar"><div id="healthFill"></div></div>
     <div id="healthText">100 / 100</div>
   </div>
-  <div id="evidenceWrap">
-    <div class="label">EVIDENCE LOG</div>
-    <div id="evidenceList"></div>
+  <div id="controlsHud">
+    <div class="label">CONTROLS</div>
+    <table>
+      <tr><td class="key">WASD</td><td class="desc">move</td></tr>
+      <tr><td class="key">MOUSE</td><td class="desc">look</td></tr>
+      <tr><td class="key">LMB</td><td class="desc">EMP pulse</td></tr>
+      <tr><td class="key">RMB (hold)</td><td class="desc">charged burst</td></tr>
+      <tr><td class="key">E</td><td class="desc">interact / collect</td></tr>
+      <tr><td class="key">F</td><td class="desc">flashlight</td></tr>
+      <tr><td class="key">SHIFT</td><td class="desc">sprint</td></tr>
+      <tr><td class="key">SPACE</td><td class="desc">jump</td></tr>
+      <tr><td class="key">ESC</td><td class="desc">pause</td></tr>
+    </table>
   </div>
   <canvas id="minimap" width="180" height="180"></canvas>
   <div id="batteryWrap">
@@ -5696,13 +5709,9 @@ function refreshHealthUI(){
   else $('healthFill').style.background = 'linear-gradient(90deg,#3fb268,#8ee39c)';
 }
 function refreshEvidenceUI(){
-  const order = ['grid','water','diesel','subsidy'];
-  const html = order.map(k=>{
-    const m = gs.evidenceMeta[k];
-    const got = gs.evidence[k];
-    return '<div class="ev-line '+(got?'got':'')+'">'+(got?'[x]':'[ ]')+' '+m.name+'</div>';
-  }).join('');
-  $('evidenceList').innerHTML = html;
+  // Evidence checklist UI has been replaced by the controls panel.
+  // Progress is still communicated via the OBJECTIVE bar (count of 4)
+  // and the toast that fires on each collection.
 }
 function setObjective(txt){
   gs.objective = txt;
