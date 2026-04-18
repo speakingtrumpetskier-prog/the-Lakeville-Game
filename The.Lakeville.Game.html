@@ -375,12 +375,12 @@
     <table>
       <tr><td class="key">WASD</td><td class="desc">move</td></tr>
       <tr><td class="key">MOUSE</td><td class="desc">look</td></tr>
-      <tr><td class="key">LMB</td><td class="desc">EMP pulse</td></tr>
+      <tr><td class="key">LMB / SPACE</td><td class="desc">EMP pulse</td></tr>
       <tr><td class="key">RMB (hold)</td><td class="desc">charged burst</td></tr>
       <tr><td class="key">E</td><td class="desc">interact / collect</td></tr>
       <tr><td class="key">F</td><td class="desc">flashlight</td></tr>
       <tr><td class="key">SHIFT</td><td class="desc">sprint</td></tr>
-      <tr><td class="key">SPACE</td><td class="desc">jump</td></tr>
+      <tr><td class="key">SPACE</td><td class="desc">jump (+ fire)</td></tr>
       <tr><td class="key">ESC</td><td class="desc">pause</td></tr>
     </table>
   </div>
@@ -1734,10 +1734,12 @@ function buildNetworkGraph(){
   // replaces the old "dark until first hallway" effect.
   n.activation = 1;
   n.activationTarget = 1;
-  // Per-room illumination: each room's lines stay dark until the player
-  // crosses its pink line (into the corresponding hallway). Lobby starts
-  // lit so spawn sees the green spine.
-  n.litRooms = { 'Lobby': true };
+  // Per-room illumination: every room starts dark. When the player first
+  // enters a room (or crosses into its hallway), the room is marked lit,
+  // and its brightness eases from 0 toward 1 over ~1.5s. This gives the
+  // lobby itself a soft fade-in on walk-in rather than being pre-lit.
+  n.litRooms = {};          // rooms that have been unlocked
+  n.litLevels = {};         // eased brightness per room, 0..1
 
   // ---- Floor spine ----
   const F = (x1,z1,x2,z2, opts) => addNetSegment(x1,0.035,z1, x2,0.035,z2, opts);
@@ -1886,6 +1888,13 @@ function updateNetwork(dt){
   net.rainbowMode = Math.max(0, net.rainbowMode - dt);
   // Ramp activation toward its target (0 at spawn, 1 after first hallway).
   net.activation += (net.activationTarget - net.activation) * Math.min(1, dt * 0.35);
+  // Ease each unlocked room's brightness toward 1 (fade-in over ~1.5s).
+  if(net.litLevels){
+    for(const room of Object.keys(net.litRooms)){
+      const cur = net.litLevels[room] || 0;
+      if(cur < 1) net.litLevels[room] = cur + (1 - cur) * Math.min(1, dt * 0.9);
+    }
+  }
 
   // Re-assert the current room's wave color once bloodMode ends, so the
   // network smoothly returns to room palette after boss reveal.
@@ -1998,14 +2007,12 @@ function updateNetwork(dt){
         baseOp = Math.min(1.0, 0.8 + wave*0.2);
       }
     }
-    // Gate by per-room illumination: each room's segments are invisible
-    // until the player crosses its pink line (triggering music + lights
-    // together). Lobby starts lit; other rooms unlock on first hallway
-    // entry. Victory/blood modes always show everything.
+    // Gate by per-room illumination: each room fades in from 0→1 over
+    // ~1.5s once unlocked. Lobby unlocks on walk-in; destination rooms
+    // unlock when the pink line is crossed. Victory/blood modes bypass.
     if(net.bloodMode <= 0 && net.rainbowMode <= 0 && !(gs.showVictoryPath && s.onPath)){
-      const lit = net.litRooms && net.litRooms[s.room];
-      if(!lit) baseOp = 0;
-      baseOp *= net.activation;
+      const lvl = net.litLevels ? (net.litLevels[s.room] || 0) : 0;
+      baseOp *= lvl * net.activation;
     }
     // VICTORY MODE: after boss defeat, every non-path segment fades to black
     // and the single path blinks one panel at a time, traveling toward Filing.
@@ -3286,6 +3293,82 @@ function triggerSubstationSprinklers(){
   shake(0.4);
   showToast('SPRINKLER RELEASE', 'Water-mitigation interlock active.');
 }
+
+/* ============================================================
+   CATWALK POWER-DOWN — fires when the player collects the grid
+   exhibit from the catwalk. Signals "this room is done, move on":
+     - Music fades to silence over 5s (slower than the default)
+     - Each server rack's LED panel dims to black over 5s
+     - Thin plumes of smoke rise from each rack for ~12s
+   ============================================================ */
+function triggerCatwalkPowerDown(){
+  if(gs.catwalkPowerDown && gs.catwalkPowerDown.active) return;
+  gs.catwalkPowerDown = {
+    active: true,
+    startedAt: gs.time,
+    duration: 5.0,
+    smokeDuration: 12.0,
+    ledMats: [],
+    rackXZ: []
+  };
+  // Snapshot every server-rack LED material so we can fade each one's
+  // overall material opacity down in unison.
+  for(const g of gs.serverLEDGroups){
+    if(g && g.origMat){
+      g.origMat.transparent = true;
+      g.origMat._powerDownStart = g.origMat.opacity || 1.0;
+      gs.catwalkPowerDown.ledMats.push(g.origMat);
+      if(g.mesh){
+        gs.catwalkPowerDown.rackXZ.push({x:g.mesh.position.x, z:g.mesh.position.z});
+      }
+    }
+  }
+  // Fade the theme gain to 0 on a long ramp (5s). The per-frame
+  // updateRoomTracking override will fight this, so set a hold flag that
+  // suppresses setRoom for the duration.
+  gs.catwalkPowerDown.musicHeld = true;
+  if(audio && audio._themeGain){
+    const tn = audio.now();
+    audio._themeGain.gain.cancelScheduledValues(tn);
+    audio._themeGain.gain.setValueAtTime(audio._themeGain.gain.value, tn);
+    audio._themeGain.gain.linearRampToValueAtTime(0, tn + 5.0);
+  }
+  showToast('BUILDING A OFFLINE', 'Move on — the next exhibit is elsewhere.');
+}
+
+function updateCatwalkPowerDown(dt){
+  const pd = gs.catwalkPowerDown;
+  if(!pd || !pd.active) return;
+  const elapsed = gs.time - pd.startedAt;
+  const k = Math.min(1, elapsed / pd.duration);
+  // Dim all rack LED material opacities toward 0. Using material.opacity
+  // so the bright animated LED texture fades uniformly.
+  for(const m of pd.ledMats){
+    const start = m._powerDownStart ?? 1.0;
+    m.opacity = Math.max(0, start * (1 - k));
+  }
+  // Smoke rising from each rack — a steady trickle during `smokeDuration`.
+  if(elapsed < pd.smokeDuration){
+    // ~1 spawn per frame across all racks — smoke is intentionally sparse
+    if(pd.rackXZ.length && Math.random() < 0.65){
+      const r = pd.rackXZ[Math.floor(Math.random() * pd.rackXZ.length)];
+      // Grey smoke particle with mild upward velocity, no gravity (we use
+      // the existing particle system which gives downward gravity — so we
+      // push upward strongly enough that it climbs before falling back).
+      const px = r.x + (Math.random() - 0.5) * 0.8;
+      const pz = r.z + (Math.random() - 0.5) * 0.8;
+      spawnParticle(px, 3.5, pz,
+        (Math.random()-0.5)*0.3, 3 + Math.random()*1.6, (Math.random()-0.5)*0.3,
+        Math.random() < 0.5 ? 0x6a7078 : 0x4a5058, 1.2, 0.18);
+    }
+  }
+  // End condition: music is silent AND smoke window elapsed
+  if(elapsed > pd.smokeDuration){
+    pd.active = false;
+    pd.musicHeld = false;
+  }
+}
+
 function makeCoolingTowerTex(){
   const c = document.createElement('canvas'); c.width=512; c.height=512;
   const g = c.getContext('2d');
@@ -5607,11 +5690,13 @@ function collectPickup(pu){
       gs.evidence[pu.key] = true;
       refreshEvidenceUI();
       showToast('EVIDENCE SECURED', meta.name);
-      // Substation ambush: picking up the 'diesel' exhibit in the center of
-      // the Xcel Interconnect room trips the facility's containment protocol.
+      // Substation ambush on the diesel exhibit.
       if(pu.key === 'diesel' && gs.substationTrap && gs.substationTrap.state === 'inactive'){
         triggerSubstationTrap();
       }
+      // Catwalk power-down on the grid exhibit: Building A goes quiet —
+      // music fades over 5s, rack LEDs die off, smoke rises from the racks.
+      if(pu.key === 'grid') triggerCatwalkPowerDown();
       if(allEvidence() && !gs.bossSpawned){
         spawnBoss();
       } else if(!allEvidence()){
@@ -6228,6 +6313,11 @@ function updateRoomTracking(){
   if(isSubstation && (!trap || trap.state === 'inactive')) musicRoom = null;
   // A set-piece can pin music to a specific theme regardless of location.
   if(gs._musicOverride) musicRoom = gs._musicOverride;
+  // Catwalk power-down: hold the theme gain ramp steady (no setRoom calls
+  // that would reset the fade) for the duration of the power-down.
+  if(gs.catwalkPowerDown && gs.catwalkPowerDown.musicHeld){
+    return;
+  }
   audio.setRoom(musicRoom);
 }
 
@@ -6533,19 +6623,31 @@ function init(){
     if(e.code==='KeyE') input.interact = true;
     if(e.code==='KeyF') input.flashlight = !input.flashlight;
     if(e.code==='Escape'){ togglePause(); }
+    // Space fires in addition to jumping — gives trackpad / keyboard-only
+    // players a way to shoot without having to click.
+    if(e.code==='Space' && gs.phase==='playing') input.firing = true;
     if(['KeyW','KeyA','KeyS','KeyD','Space'].includes(e.code)) e.preventDefault();
   });
-  addEventListener('keyup', e=>{ input.keys.delete(e.code); });
+  addEventListener('keyup', e=>{
+    input.keys.delete(e.code);
+    // Only release fire on Space-up if LMB is not currently held. Avoids
+    // the Space release killing an in-progress LMB fire-hold.
+    if(e.code==='Space') input.firing = input.mouseFiring === true;
+  });
   addEventListener('mousemove', e=>{
     if(input.lock){ input.mx += e.movementX; input.my += e.movementY; }
   });
   addEventListener('mousedown', e=>{
     if(gs.phase!=='playing') return;
-    if(e.button===0) input.firing = true;
+    if(e.button===0){ input.firing = true; input.mouseFiring = true; }
     if(e.button===2){ input.charging = true; input.chargeLevel = 0; $('chargeBar').style.display='block'; }
   });
   addEventListener('mouseup', e=>{
-    if(e.button===0) input.firing = false;
+    if(e.button===0){
+      input.mouseFiring = false;
+      // Keep firing only while Space is still held.
+      if(!input.keys.has('Space')) input.firing = false;
+    }
     if(e.button===2){
       if(gs.phase==='playing' && input.charging) releaseChargeShot();
       input.charging = false; input.chargeLevel = 0;
@@ -6903,6 +7005,7 @@ function loop(){
     updateCorridorFigureEvent(dt);
     updateRoomTracking();       // every frame — music/network follow pink/orange boundaries
     updateSubstationTrap(dt);
+    updateCatwalkPowerDown(dt);
     updateNetwork(dt);
     updateRainbowMode(dt);
     updateMonitorGlitch(dt);
