@@ -6221,12 +6221,18 @@ function spawnMuzzleFlash(x,y,z,color,intensity){
    ===================================================== */
 function createPlayer(){
   const p = {
-    // Spawn near the south entrance, in front of the reception desk at
-    // z=-8. Player looks NORTH (+z) through the lobby, with the OLAM cover
-    // signage on the south wall directly behind them.
-    pos: new THREE.Vector3(0, 0, -10.5),
+    // Spawn on the WEST side of the lobby facing EAST. From here:
+    //  - Front (east) looks straight through Corr E into Building A /
+    //    Server Hall A — the catwalk room. Red-eyed bots are visible in
+    //    the distance walking among the racks.
+    //  - Left (north) opens into Corr N toward the cooling yard with
+    //    the wireframe dancer.
+    //  - Right (south) has the reception desk at z=-8 and OLAM signage
+    //    on the south wall.
+    //  - Back (west) is the corridor toward the substation.
+    pos: new THREE.Vector3(-8, 0, 0),
     vel: new THREE.Vector3(),
-    yaw: Math.PI,    // forward = +z → facing into the lobby
+    yaw: Math.PI / 2,   // forward = +x (east) → staring down the catwalk hallway
     pitch: 0,
     onGround: true,
     hp: MAX_HP,
@@ -7320,10 +7326,10 @@ function updateRoomTracking(){
       gs.network.litRooms[destForCorridor] = true;
     }
   }
-  // Lobby lights up only once the player walks NORTH past the reception
-  // desk (desk sits at z=-8 running x=-4..4; spawn is behind it at z=-10.5).
-  // Threshold z>-7 fires the moment the player steps around the desk.
-  if(roomNow === 'Lobby' && gs.player.pos.z > -7 &&
+  // Lobby lights up once the player steps off the west entrance plate
+  // and commits into the room. Spawn is at x=-8 facing east; threshold
+  // x>-5 fires as soon as they step forward across the reception line.
+  if(roomNow === 'Lobby' && gs.player.pos.x > -5 &&
      gs.network.litRooms && !gs.network.litRooms['Lobby']){
     gs.network.litRooms['Lobby'] = true;
   }
@@ -7540,11 +7546,16 @@ function drawMinimap(){
    SPAWNS
    ===================================================== */
 function spawnInitialEnemies(){
-  // Server Hall A (the catwalk room): drones removed — they flew around
-  // at mid-height and were too sneaky to spot from the catwalk. The bot +
-  // turrets carry the ground-floor combat.
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(38, 0, 0)));
-  spawnTurret(30, 10);    // server hall
+  // Server Hall A (the catwalk room): drones removed — they flew
+  // around at mid-height and were too sneaky to spot from the catwalk.
+  // The bots + turrets carry the ground-floor combat.
+  // The FIRST bot is positioned near the west entrance of Server Hall A
+  // so it's visible through Corr E from the player's spawn point. Its
+  // idle wander (radius ~0.3) gives the "robot with red eyes walking
+  // around in the background" tableau on load-in.
+  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(28, 0, 0)));
+  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(42, 0, 3)));
+  spawnTurret(34, 10);    // server hall (moved slightly so it's not on top of bot)
   spawnTurret(52, -10);   // server hall
   // Substation is EMPTY at spawn. The diesel pickup is what triggers every
   // encounter in that room — no pre-placed bots, drones, or turrets here.
