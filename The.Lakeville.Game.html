@@ -500,7 +500,8 @@ const gs = {
   filingDoorOpen:false,
   bossSpawned:false,
   bossDefeated:false,
-  evidence:{ water:false, diesel:false, subsidy:false, grid:false },
+  evidence:{ water:false, diesel:false, subsidy:true, grid:false },  // subsidy auto-granted (CD cut)
+  totalClearRooms: 3,
   evidenceMeta:{
     grid: {
       name:'Power Draw — 3 MW vs. Hyperscale',
@@ -1094,18 +1095,104 @@ class AudioEngine {
       }
     };
 
-    // Main scheduler — plays the current room's theme once per bar.
+    // Main scheduler — plays the current room's theme once per bar. When
+    // `_brokenWindDown` is set, it plays a few more stunted, broken
+    // renditions with growing pauses and random skips before cracking
+    // to a hard stop. The original melody is altered in place, not
+    // layered with a separate wind-down track.
     const schedule = ()=>{
       if(!this.ctx) return;
       const room = this._room || '';
       const theme = this._themes[room];
+      const bw = this._brokenWindDown;
+      if(bw){
+        bw.step++;
+        if(bw.step > bw.maxSteps){
+          // Final crack, then long silence.
+          this._playCrack();
+          this._brokenWindDown = null;
+          setTimeout(schedule, bar*2500);
+          return;
+        }
+        // Growing skip chance: feels like the mechanism catching
+        const skipChance = 0.12 + bw.step * 0.12;
+        const slowK = 1.0 + bw.step * 0.35;       // bars get longer
+        // Fade theme gain progressively toward 0
+        if(this._themeGain){
+          const tn = this.now();
+          this._themeGain.gain.cancelScheduledValues(tn);
+          this._themeGain.gain.setValueAtTime(this._themeGain.gain.value, tn);
+          const target = Math.max(0, 0.85 * (1 - bw.step/bw.maxSteps));
+          this._themeGain.gain.linearRampToValueAtTime(target, tn + bar * slowK);
+        }
+        // Creak sound every broken bar
+        this._playCreak(bw.step);
+        if(Math.random() < skipChance){
+          // Stop-and-start — a bar of silence
+          setTimeout(schedule, bar * slowK * 1000);
+          return;
+        }
+        if(theme){
+          const t = this.now();
+          try { theme(t, bar * slowK); } catch(e){}
+        }
+        setTimeout(schedule, bar * slowK * 1000);
+        return;
+      }
+      // Normal playback
       if(theme){
         const t = this.now();
-        try { theme(t, bar); } catch(e){ /* don't let an audio bug kill the scheduler */ }
+        try { theme(t, bar); } catch(e){}
       }
       setTimeout(schedule, bar*1000);
     };
     schedule();
+  }
+  // Trigger the broken-wind-down mode on the CURRENT theme. Existing
+  // playback continues but gets stunted and slowed over ~5-7 bars.
+  breakCurrentTheme(){
+    if(!this.ready) return;
+    this._brokenWindDown = { step:0, maxSteps:5, start:this.now() };
+  }
+  // Old-wind-up-toy creak — filtered noise plus a low woody tick.
+  _playCreak(step){
+    if(!this.ready) return;
+    const t = this.now();
+    const bufSize = Math.max(1, Math.floor(this.ctx.sampleRate * 0.35));
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<bufSize;i++){
+      d[i] = (Math.random()*2-1) * Math.pow(1 - i/bufSize, 2) * 0.25;
+    }
+    const src = this.ctx.createBufferSource(); src.buffer = buf;
+    const bp = this.ctx.createBiquadFilter(); bp.type='bandpass';
+    bp.frequency.value = 520 - step*80; bp.Q.value = 6;
+    const g = this.ctx.createGain(); g.gain.value = 0.18;
+    src.connect(bp); bp.connect(g); g.connect(this.master);
+    src.start(t);
+    // Woody tick under the creak
+    const o = this.ctx.createOscillator(); o.type='triangle';
+    o.frequency.setValueAtTime(180 - step*20, t);
+    o.frequency.exponentialRampToValueAtTime(80, t+0.25);
+    const og = this.ctx.createGain(); og.gain.value = 0;
+    og.gain.linearRampToValueAtTime(0.1, t + 0.02);
+    og.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    o.connect(og); og.connect(this.master);
+    o.start(t); o.stop(t + 0.32);
+  }
+  // Final crack — a short snap + low thud as the mechanism gives up.
+  _playCrack(){
+    if(!this.ready) return;
+    const t = this.now();
+    this.noise({dur:0.1, vol:0.28, lp:5000, hp:1500});
+    const o = this.ctx.createOscillator(); o.type='sine';
+    o.frequency.setValueAtTime(70, t);
+    o.frequency.exponentialRampToValueAtTime(32, t+0.4);
+    const g = this.ctx.createGain(); g.gain.value = 0;
+    g.gain.linearRampToValueAtTime(0.22, t+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+0.55);
+    o.connect(g); g.connect(this.master);
+    o.start(t); o.stop(t+0.6);
   }
   setRoomsVisitedHum(n){
     if(!this._humGain) return;
@@ -1437,14 +1524,15 @@ function buildLevel(){
   addRoom('Corr E', 18,0, 12,6, 6.0);
   addRoom('Corr W', -18,0, 12,6);
   addRoom('Corr N', 0,16, 6,8);
-  addRoom('Corr S', 0,-16, 6,8);
   addRoom('Corr F', 0, 50, 6, 12);
 
-  // Lobby walls with gaps toward corridors
-  addWallWithGap('x', 12, -12, 12, 0, 6);
-  addWallWithGap('x', -12, -12, 12, 0, 6);
-  addWallWithGap('z', 12, -12, 12, 0, 6);
-  addWallWithGap('z', -12, -12, 12, 0, 6);
+  // Lobby walls with gaps toward corridors. South wall is SEALED — the
+  // Community Development corridor is cut in this build, so the lobby
+  // south wall is now solid (OLAM signage hangs on it from the inside).
+  addWallWithGap('x', 12, -12, 12, 0, 6);    // north wall: gap → Corr N
+  addWall(-12, -12, 12, -12);                // south wall: SEALED
+  addWallWithGap('z', 12, -12, 12, 0, 6);    // east wall:  gap → Corr E
+  addWallWithGap('z', -12, -12, 12, 0, 6);   // west wall:  gap → Corr W
 
   // Server hall (taller — accommodates the catwalk and head clearance)
   addWallWithGap('z', 24, -13, 13, 0, 6, 6.0);
@@ -1469,16 +1557,11 @@ function buildLevel(){
   addWall(-14, 20, -14, 48);
   addWall(14, 20, 14, 48);
 
-  // Office
-  addWallWithGap('x', -21, -11, 11, 0, 6);
-  addWall(-11, -21, -11, -43);
-  addWall(11, -21, 11, -43);
-  // South wall of office: a glass viewing wall + door to the receptor zone
-  addWallWithGap('x', -43, -11, 11, 0, 4.5);
-
-  // Receptor zone (outdoor / perimeter). Area between office south wall and
-  // the far receptor silhouettes. Logical footprint x=-30..30, z=-43..-90.
-  addReceptorZone();
+  // ---- Community Development / office is CUT in this build. Its corridor
+  // stub behind the spawn now dead-ends in a plain wall. The receptor
+  // perimeter and all its related geometry are not built. ----
+  // (Corr S still exists as a short dead-end; we'll cap its south end.)
+  addReceptorZone_STUB();
 
   // Corridor walls — endpoints extend ALL THE WAY to the adjacent room's
   // outer wall (not just past the doorway plane). This is critical for the
@@ -1495,8 +1578,7 @@ function buildLevel(){
   addWall(-26.1, -3, -11.4, -3);  // Corr W bottom
   addWall(-3, 11.4, -3, 20.6);    // Corr N west
   addWall( 3, 11.4,  3, 20.6);    // Corr N east
-  addWall(-3, -21.1, -3, -11.4);  // Corr S west — reaches Community Dev north wall at z=-21
-  addWall( 3, -21.1,  3, -11.4);  // Corr S east
+  // Corr S removed (Community Development cut).
   addWall(-3, 47.4, -3, 56.6);    // Corr F west
   addWall( 3, 47.4,  3, 56.6);    // Corr F east
 
@@ -1507,8 +1589,7 @@ function buildLevel(){
   const capMat = new THREE.MeshStandardMaterial({map:ceilTex, roughness:0.9, metalness:0.05});
   const wCap = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 6), capMat);
   wCap.position.set(-25, 4.4, 0); scene.add(wCap);        // Corr W ↔ Substation ceiling cap
-  const sCap = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 1), capMat);
-  sCap.position.set(0, 4.4, -20.5); scene.add(sCap);      // Corr S ↔ Community Dev ceiling cap
+  // (Corr S ↔ Community Dev ceiling cap removed with that corridor.)
 
   // Filing room
   addWallWithGap('x', 53, -7, 7, 0, 6);
@@ -1520,8 +1601,7 @@ function buildLevel(){
   const fillerMat = new THREE.MeshStandardMaterial({map:floorTex, roughness:0.55, metalness:0.25});
   const sWFill = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 6), fillerMat);
   sWFill.position.set(-25, -0.1, 0); scene.add(sWFill);        // substation ↔ corridor W
-  const sFill = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 1), fillerMat);
-  sFill.position.set(0, -0.1, -20.5); scene.add(sFill);        // office ↔ corridor S
+  // (office↔corridor S floor filler removed with that corridor.)
   // Also: Building A ↔ corridor E sealed by precise edge alignment, but add a
   // cosmetic seam plate in case of sub-pixel z-fighting
   const eFill = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 6.2), fillerMat);
@@ -1536,7 +1616,6 @@ function buildLevel(){
     [ 12,  3],[ 12, -3],[ 24,  3],[ 24, -3],   // Corr E west + east
     [-12,  3],[-12, -3],[-26,  3],[-26, -3],   // Corr W west + east
     [ 3, 12],[-3, 12],[ 3, 20],[-3, 20],       // Corr N south + north
-    [ 3,-12],[-3,-12],[ 3,-21],[-3,-21],       // Corr S north + south
     [ 3, 48],[-3, 48],[ 3, 53],[-3, 53]        // Corr F south + north (filing)
   ];
   for(const [x, z] of postCorners){
@@ -1567,7 +1646,7 @@ function buildLevel(){
   decorateServerHall();
   decorateSubstation();
   decorateCooling();
-  decorateOffice();
+  // decorateOffice() — cut: Community Development room removed.
   decorateFilingRoom();
 
   // Locked filing door
@@ -1629,7 +1708,11 @@ function _registerSeg(mesh, mat, mid, opts){
     pathHue: opts.pathHue !== undefined ? opts.pathHue : -1,
     // Classify by midpoint. Drives per-room color + per-room pulse style in
     // updateNetwork, so each room gets a genuinely distinct visual identity.
-    room: classifyRoomByPoint(mid.x, mid.z)
+    room: classifyRoomByPoint(mid.x, mid.z),
+    // Which room a lobby segment "points to", used to dim sections of the
+    // lobby spine as each destination is cleared. 'accent' means a
+    // decorative lobby segment that stays lit until ALL rooms are cleared.
+    leadsTo: opts.leadsTo || null
   };
   gs.network.segments.push(seg);
   return seg;
@@ -1808,32 +1891,33 @@ function buildNetworkGraph(){
   const F = (x1,z1,x2,z2, opts) => addNetSegment(x1,0.035,z1, x2,0.035,z2, opts);
 
   // EAST-WEST SPINE — split at lobby boundaries so each room's segment
-  // takes its own room's color. Prevents the lobby green from bleeding
-  // down the corridors into Substation / Building A.
-  F(-53.9, 0, -12, 0);   // Substation + Corr W (both map to Substation)
-  F(-12,   0,  12, 0);   // Lobby (green)
-  F( 12,   0, 55.9, 0);  // Corr E + Building A (both map to Building A)
+  // takes its own room's color. The lobby portion is further split at x=0
+  // so the west half can dim independently from the east half once the
+  // corresponding destination room has been cleared.
+  F(-53.9, 0, -12, 0);       // Substation + Corr W
+  F(-12,   0,   0, 0, { leadsTo:'Substation' });                  // lobby W half
+  F(  0,   0,  12, 0, { leadsTo:'Building A — Light Industrial' }); // lobby E half
+  F( 12,   0, 55.9, 0);      // Corr E + Building A
 
-  // NORTH-SOUTH SPINE — same idea. Lobby piece is its own segment so the
-  // green stops at the lobby wall, and Community Dev / Corr S show as gold.
-  F(0, -42.9, 0, -12);                                  // Community Dev + Corr S
-  F(0, -12,   0,  4);                                   // Lobby south
-  F(0,  4, 0, 12, { onPath:true, pathIndex:0 });
+  // NORTH-SOUTH SPINE — south piece now points to nothing (CD is cut),
+  // so tagged as 'accent' so it stays on until all rooms clear.
+  F(0, -42.9, 0, -12);                                  // (dead arm — stays reachable for debug)
+  F(0, -12,   0,  4, { leadsTo:'accent' });             // lobby south decorative
+  F(0,  4, 0, 12, { onPath:true, pathIndex:0, leadsTo:'Cooling Yard' });
   F(0, 12, 0, 20, { onPath:true, pathIndex:1 });
   F(0, 20, 0, 34, { onPath:true, pathIndex:2 });
   F(0, 34, 0, 48, { onPath:true, pathIndex:3 });
   F(0, 48, 0, 56, { onPath:true, pathIndex:4 });
   F(0, 56, 0, 66.9, { onPath:true, pathIndex:5 });
 
-  // LOBBY accents (terminate at lobby walls at z=±12 or x=±12, NOT mid-floor)
-  // Vertical accents at x=±6 span the lobby wall-to-wall
-  F(-6, -11.9, -6, 11.9);
-  F(6, -11.9, 6, 11.9);
-  // Diagonal corner accents (wall-anchored)
-  F(-11.9, -6, -6, -11.9);
-  F( 11.9, -6,  6, -11.9);
-  F(-11.9,  6, -6,  11.9);
-  F( 11.9,  6,  6,  11.9);
+  // LOBBY accents (tagged 'accent' — stay lit until ALL rooms are cleared,
+  // then they dim as well for a fully-dark lobby before the celebration).
+  F(-6, -11.9, -6, 11.9, { leadsTo:'accent' });
+  F( 6, -11.9,  6, 11.9, { leadsTo:'accent' });
+  F(-11.9, -6, -6, -11.9, { leadsTo:'accent' });
+  F( 11.9, -6,  6, -11.9, { leadsTo:'accent' });
+  F(-11.9,  6, -6,  11.9, { leadsTo:'accent' });
+  F( 11.9,  6,  6,  11.9, { leadsTo:'accent' });
 
   // BUILDING A internal branches — span wall-to-wall at z=±12.9
   F(28, -12.9, 28, 12.9);
@@ -2076,6 +2160,16 @@ function updateNetwork(dt){
     if(net.bloodMode <= 0 && net.rainbowMode <= 0 && !(gs.showVictoryPath && s.onPath)){
       const lvl = net.litLevels ? (net.litLevels[s.room] || 0) : 0;
       baseOp *= lvl * net.activation;
+      // Lobby-segment directional dim: once the room this segment "leads to"
+      // has been cleared, its segment fades to 0. Accent segments dim only
+      // after ALL destination rooms are cleared.
+      const cleared = gs.clearedRooms || {};
+      if(s.leadsTo && s.leadsTo !== 'accent' && cleared[s.leadsTo]){
+        baseOp = 0;
+      } else if(s.leadsTo === 'accent'){
+        const n = Object.keys(cleared).length;
+        if(n >= (gs.totalClearRooms || 3)) baseOp = 0;
+      }
     }
     // VICTORY MODE: after boss defeat, every non-path segment fades to black
     // and the single path blinks one panel at a time, traveling toward Filing.
@@ -2188,9 +2282,9 @@ function addDoorframe(axis, coord, gapCenter, width, color=0x8ee39c, h=4.2){
 }
 
 function addDoorframes(){
-  // Lobby perimeter doorways — match each addWallWithGap opening
+  // Lobby perimeter doorways — match each addWallWithGap opening. (South
+  // is sealed in this build, so no doorframe there.)
   addDoorframe('x', 12,  0, 6, 0x8ee39c);   // lobby → Corridor N
-  addDoorframe('x', -12, 0, 6, 0x8ee39c);   // lobby → Corridor S
   addDoorframe('z', 12,  0, 6, 0x8ee39c);   // lobby → Corridor E
   addDoorframe('z', -12, 0, 6, 0x8ee39c);   // lobby → Corridor W
   // Building A west face (from Corridor E)
@@ -2203,11 +2297,11 @@ function addDoorframes(){
   addDoorframe('x', 48, 0, 6, 0x882222);
   // Filing Room south face (from Filing corridor)
   addDoorframe('x', 53, 0, 6, 0x8ee39c);
-  // Community Development (from Corridor S)
-  addDoorframe('x', -21, 0, 6, 0xffd28c);
-  // Receptor zone door (south wall of CD office)
-  addDoorframe('x', -43, 0, 5, 0x8aa2c8, 3.4);
 }
+
+// Receptor zone is cut in this build — keep a noop so buildLevel's single
+// call compiles without touching the big original addReceptorZone body.
+function addReceptorZone_STUB(){}
 
 function makeGridTexture(size, base, line, step){
   const c = document.createElement('canvas');
@@ -3432,23 +3526,80 @@ function updateCoolingAutomaton(dt){
   if(a.state === 'winding_down'){
     const el = gs.time - a.windStart;
     const k = Math.min(1, el / a.windDuration);
-    // Ease arms downward
+    const dim = 1 - k;
+
+    // Room CEILING light flickers hard in the first second, then dims to ~10%
+    const ceil = gs.coolingCeilLight;
+    if(ceil && ceil.light){
+      if(ceil._origBase === undefined) ceil._origBase = ceil.base;
+      if(el < 1.2){
+        // Chaotic flicker
+        const flick = Math.random() < 0.55 ? 1.0 : (Math.random() < 0.4 ? 0.05 : 0.35);
+        ceil.light.intensity = ceil._origBase * flick;
+        if(ceil.cone && ceil.cone.material){
+          ceil.cone.material.opacity = 0.35 * flick;
+        }
+      } else {
+        // Settle to a dim 10% and stay there
+        const tail = Math.max(0.1, dim * 0.6);
+        ceil.light.intensity = ceil._origBase * tail;
+        ceil.base = ceil._origBase * tail;
+        if(ceil.cone && ceil.cone.material){
+          ceil.cone.material.opacity = 0.35 * tail;
+        }
+      }
+    }
+    // Steam plumes fade too (they're blue-tinged mist)
+    if(gs.steams){
+      for(const steam of gs.steams){
+        if(steam.material){
+          if(steam.material._origOp === undefined) steam.material._origOp = steam.material.opacity || 0.15;
+          steam.material.opacity = steam.material._origOp * dim;
+        }
+      }
+    }
+
+    // Arms fall inward
     for(let i=0; i<a.arms.length; i++){
       const side = i === 0 ? -1 : 1;
-      a.arms[i].rotation.z = -side * k * 0.55;   // arms fall inward
+      a.arms[i].rotation.z = -side * k * 0.55;
     }
-    // Fade emissives + opacities
-    const dim = 1 - k;
-    if(a.automatonLight) a.automatonLight.intensity = 1.4 * dim;
+    // Lights fade — multiple point lights contribute to the glow
+    if(a.automatonLight) a.automatonLight.intensity = 3.4 * dim;
+    if(a.facePl) a.facePl.intensity = 2.0 * dim;
+    if(a.faceWarm) a.faceWarm.intensity = 0.7 * dim;
+    if(a.rimLight) a.rimLight.intensity = 1.2 * dim;
+    // Face pieces fade
+    if(a.mouth && a.mouth.material){ a.mouth.material.opacity = (a.mouth.material.opacity ?? 1) * 0.97; }
+    // Opacities + emissives across all tracked materials
     if(a.heart && a.heart.material) a.heart.material.opacity = 1.0 * dim;
-    if(a.halo && a.halo.material) a.halo.material.opacity = 0.7 * dim;
+    if(a.halo && a.halo.material) a.halo.material.opacity = 0.85 * dim;
+    if(a.haloInner && a.haloInner.material) a.haloInner.material.opacity = 0.65 * dim;
     if(a.inlay && a.inlay.material) a.inlay.material.opacity = 0.85 * dim;
-    // Brass emissive damp-down
-    for(const m of a.materialsToDim){
+    for(const m of a.emissiveMats){
       if(m && m.emissive){
         if(m._origEmissive === undefined) m._origEmissive = m.emissiveIntensity;
         m.emissiveIntensity = m._origEmissive * dim;
       }
+      if(m && m.opacity !== undefined && m.transparent){
+        if(m._origOp === undefined) m._origOp = m.opacity;
+        m.opacity = m._origOp * dim;
+      }
+    }
+    // Eye discs fade to near-black
+    if(a.eyes){
+      for(const e of a.eyes){
+        if(e.material){
+          if(e.material._origColor === undefined) e.material._origColor = e.material.color.clone();
+          const c = e.material._origColor.clone().multiplyScalar(dim);
+          e.material.color.copy(c);
+        }
+      }
+    }
+    // Jewel opacity too
+    if(a.jewel && a.jewel.material){
+      if(a.jewel.material._origOp === undefined) a.jewel.material._origOp = 0.92;
+      a.jewel.material.opacity = a.jewel.material._origOp * dim;
     }
     if(k >= 1){
       a.state = 'dead';
@@ -3465,12 +3616,14 @@ function triggerCoolingWindDown(){
     a.windStart = gs.time;
     a.targetRotationSpeed = 0;
   }
-  // Music-box wind-down: play a descending, slowing, detuning scale on top
-  // of the existing theme, then ramp theme gain to 0 across ~5s.
-  audio.musicBoxWindDown();
+  // Break the CURRENT theme in place — it keeps playing but stutters,
+  // slows, skips, and finally cracks to a halt. Much more melancholy than
+  // layering a separate music-box track on top of the ongoing Cooling
+  // Yard theme.
+  audio.breakCurrentTheme();
   // Hold music-room changes during the wind-down so the theme doesn't
-  // re-engage when the player re-enters the cooling yard later.
-  gs.coolingWindHeld = { start: gs.time, duration: 6.0 };
+  // re-engage if the player re-enters later.
+  gs.coolingWindHeld = { start: gs.time, duration: 14.0 };
   showToast('COOLING MECHANISM STOPPED', 'The automaton grinds to a halt.');
 }
 
@@ -3851,7 +4004,8 @@ function decorateCooling(){
     p.rotation.y = Math.atan2(z2-z1, x2-x1);
     scene.add(p);
   });
-  addCeilLight(0,4.2,34, 0x7ee5ff, 0.6, 24);
+  const coolCeil = addCeilLight(0, 4.2, 34, 0x7ee5ff, 0.6, 24);
+  gs.coolingCeilLight = coolCeil;
   const s = makeSignMesh('COOLING YARD — PRAIRIE DU CHIEN', 0x7ee5ff);
   s.position.set(0, 3.7, 20.8); scene.add(s);
   addEvidencePickup('water', 0, 1.3, 36, 0x7ee5ff);
@@ -3944,33 +4098,123 @@ function decorateCooling(){
     arms.push(armGroup);
   }
 
-  // Neck + head
+  // ---- NECK + HEAD ASSEMBLY ----
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.15, 12), porcelainMat);
   neck.position.y = 1.7; turntable.add(neck);
-  // Head is a glowing cyan orb with stained-glass crown
-  const headCore = new THREE.Mesh(new THREE.SphereGeometry(0.24, 18, 14),
-    new THREE.MeshStandardMaterial({color:0xf0ece2, metalness:0.1, roughness:0.2,
-      emissive:0x2a6080, emissiveIntensity:0.4}));
-  headCore.position.y = 1.95; turntable.add(headCore);
-  // Halo / crown — thin ring above the head
-  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.025, 8, 26),
-    new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.8}));
-  halo.rotation.x = Math.PI/2; halo.position.y = 2.2;
+
+  // Head SKULL — slightly larger porcelain sphere, the canvas for the face
+  const headCore = new THREE.Mesh(new THREE.SphereGeometry(0.28, 22, 16),
+    new THREE.MeshStandardMaterial({color:0xf8f2e4, metalness:0.1, roughness:0.2,
+      emissive:0x4a8ac0, emissiveIntensity:0.55}));
+  headCore.position.y = 1.98; turntable.add(headCore);
+
+  // Ornate BRASS FACEPLATE — fits over the front of the skull, etched
+  // in gold. A horizontal curved plate wrapping the front half.
+  const facePlateMat = new THREE.MeshStandardMaterial({
+    color:0xd8ae58, metalness:0.95, roughness:0.22,
+    emissive:0xaa7830, emissiveIntensity:0.5
+  });
+  const facePlate = new THREE.Mesh(
+    new THREE.SphereGeometry(0.295, 22, 14, -Math.PI*0.45, Math.PI*0.9,
+      Math.PI*0.22, Math.PI*0.56),
+    facePlateMat);
+  facePlate.position.y = 1.98; turntable.add(facePlate);
+
+  // Face lamp — internal glow that pushes through the eye sockets. A
+  // bright point light placed INSIDE the head.
+  const facePl = new THREE.PointLight(0xa0e4ff, 2.0, 3);
+  facePl.position.set(0, 1.98, 0);
+  turntable.add(facePl);
+
+  // Robotic EYES — two recessed glowing cyan discs with brass orbital rings
+  const eyeGlowMat = new THREE.MeshBasicMaterial({color:0xcbf5ff});
+  const eyeRingMat = new THREE.MeshStandardMaterial({color:0xe0b868, metalness:0.95,
+                      roughness:0.2, emissive:0x8a6a24, emissiveIntensity:0.45});
+  const eyes = [];
+  for(const side of [-1, 1]){
+    const eye = new THREE.Mesh(new THREE.CircleGeometry(0.045, 18), eyeGlowMat);
+    eye.position.set(side * 0.08, 2.02, 0.27);
+    turntable.add(eye);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.012, 6, 16), eyeRingMat);
+    ring.position.set(side * 0.08, 2.02, 0.28);
+    turntable.add(ring);
+    // Eye socket dark ring so the eye reads as recessed
+    const socket = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.008, 6, 18),
+      new THREE.MeshStandardMaterial({color:0x1a2028, metalness:0.6, roughness:0.5}));
+    socket.position.set(side * 0.08, 2.02, 0.282);
+    turntable.add(socket);
+    eyes.push(eye);
+  }
+  // Cheek filigree — two small diamond-shaped brass accents
+  for(const side of [-1, 1]){
+    const diamond = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), facePlateMat);
+    diamond.position.set(side * 0.17, 1.90, 0.265);
+    diamond.rotation.z = Math.PI/4;
+    turntable.add(diamond);
+  }
+  // MOUTH — a glowing horizontal slit with a brass hinge, warm orange inside
+  const mouthMat = new THREE.MeshBasicMaterial({color:0xffc878});
+  const mouth = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.022), mouthMat);
+  mouth.position.set(0, 1.85, 0.283);
+  turntable.add(mouth);
+  // Small decorative brass mouthpiece below
+  const chin = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.03, 0.04), facePlateMat);
+  chin.position.set(0, 1.80, 0.28);
+  turntable.add(chin);
+
+  // Forehead jewel — a raised cyan gem
+  const jewelMat = new THREE.MeshStandardMaterial({color:0x7ee5ff, metalness:0.4, roughness:0.1,
+                    emissive:0x7ee5ff, emissiveIntensity:1.3,
+                    transparent:true, opacity:0.92});
+  const jewel = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), jewelMat);
+  jewel.position.set(0, 2.11, 0.26);
+  turntable.add(jewel);
+
+  // Back-of-head filigree — decorative curves on the skull back
+  for(let i=0; i<4; i++){
+    const ang = -Math.PI*0.1 + i * 0.22;
+    const strand = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.012, 6, 10,
+      Math.PI*0.35),
+      facePlateMat);
+    strand.position.set(0, 1.98, 0);
+    strand.rotation.y = Math.PI + (i - 1.5) * 0.2;
+    strand.rotation.z = 0.1 + ang*0.4;
+    turntable.add(strand);
+  }
+
+  // Crown HALO + brighter pulsing ring
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.028, 8, 30),
+    new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.85}));
+  halo.rotation.x = Math.PI/2; halo.position.y = 2.3;
   turntable.add(halo);
-  // Crown shards — five tiny vertical stained-glass pieces arranged in a ring
-  for(let i=0; i<5; i++){
-    const ang = (i / 5) * Math.PI * 2;
-    const shard = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.02),
-      new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.75}));
-    shard.position.set(Math.cos(ang) * 0.28, 2.26, Math.sin(ang) * 0.28);
+  const haloInner = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.014, 6, 24),
+    new THREE.MeshBasicMaterial({color:0xcbf5ff, transparent:true, opacity:0.65}));
+  haloInner.rotation.x = Math.PI/2; haloInner.position.y = 2.31;
+  turntable.add(haloInner);
+  // Crown shards — eight vertical stained-glass blades
+  for(let i=0; i<8; i++){
+    const ang = (i / 8) * Math.PI * 2;
+    const tall = i%2===0 ? 0.22 : 0.14;
+    const shard = new THREE.Mesh(new THREE.BoxGeometry(0.045, tall, 0.022),
+      new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.8}));
+    shard.position.set(Math.cos(ang) * 0.32, 2.36 + tall*0.25, Math.sin(ang) * 0.32);
     shard.rotation.y = -ang;
     turntable.add(shard);
   }
 
-  // Inner bright point light (cool blue, faint, part of the mesmerizing glow)
-  const automatonLight = new THREE.PointLight(0x9de8ff, 1.6, 7);
+  // Inner cyan point light (much brighter than before so it reads as a
+  // genuine centerpiece when dancing — so the dim-down is starker)
+  const automatonLight = new THREE.PointLight(0x9de8ff, 3.4, 11);
   automatonLight.position.set(0, 1.3, 0);
   automaton.add(automatonLight);
+  // Warm accent light near the mouth so the face registers even at distance
+  const faceWarm = new THREE.PointLight(0xffd090, 0.7, 3.5);
+  faceWarm.position.set(0, 1.85, 0.4);
+  turntable.add(faceWarm);
+  // Upward rim light from the base (washes the figure from below)
+  const rimLight = new THREE.PointLight(0x6ab4e0, 1.2, 5);
+  rimLight.position.set(0, 0.4, 0);
+  automaton.add(rimLight);
 
   // Collision cylinder so the player can't walk through the automaton
   gs.walls.push({minX:-0.95, maxX:0.95, minZ:25.05, maxZ:26.95});
@@ -3978,16 +4222,21 @@ function decorateCooling(){
   // Register with state so updateAutomaton can animate it
   gs.coolingAutomaton = {
     group: automaton,
-    turntable, arms, heart, halo, inlay,
-    automatonLight, headCore,
+    turntable, arms, heart, halo, haloInner, inlay,
+    automatonLight, facePl, faceWarm, rimLight,
+    headCore, eyes, mouth, jewel,
     state: 'dancing',       // 'dancing' | 'winding_down' | 'dead'
     rotationSpeed: 0.45,
     targetRotationSpeed: 0.45,
     armSwayPhase: 0,
     windStart: 0,
     windDuration: 5.5,
-    materialsToDim: [inlayMat, heartMat, trimMat, engrave.material,
-                     baseMat, porcelainMat, headCore.material]
+    emissiveMats: [
+      inlayMat, heartMat, trimMat, engrave.material,
+      baseMat, porcelainMat, headCore.material,
+      facePlateMat, eyeGlowMat, jewelMat, mouthMat,
+      eyeRingMat
+    ]
   };
 }
 function decorateOffice(){
@@ -5590,7 +5839,8 @@ function createPlayer(){
   };
   gs.player = p;
   // Narrow, intense beam — reads as an actual flashlight, not area lighting.
-  const fl = new THREE.SpotLight(0xfff3dc, 7.5, 34, Math.PI/9, 0.55, 1.2);
+  // 40% wider cone than the original Math.PI/9 (20°): ~28° half-angle.
+  const fl = new THREE.SpotLight(0xfff3dc, 7.5, 34, Math.PI/6.4, 0.55, 1.2);
   fl.position.set(0,0,0);
   fl.target.position.set(0,0,-1);
   camera.add(fl); camera.add(fl.target);
@@ -5705,8 +5955,9 @@ function updatePlayer(dt){
     p.battery = Math.max(0, p.battery - dt);
     if(p.battery === 0) input.flashlight = false;
   } else if(!input.flashlight && p.battery < p.batteryMax){
-    // Rechargeable cell — slower than drain, so power management still matters
-    p.battery = Math.min(p.batteryMax, p.battery + dt * 0.45);
+    // Faster recharge — still slower than drain (1.0/sec) but no longer
+    // punishing to use the light tactically.
+    p.battery = Math.min(p.batteryMax, p.battery + dt * 1.1);
   }
   p.flashlight.visible = input.flashlight;
   if(p.fillLight) p.fillLight.visible = input.flashlight;
@@ -6038,15 +6289,23 @@ function collectPickup(pu){
       gs.evidence[pu.key] = true;
       refreshEvidenceUI();
       showToast('EVIDENCE SECURED', meta.name);
+      // Mark the room "cleared" for lobby-spine dim logic.
+      const roomOf = {
+        'grid':    'Building A — Light Industrial',
+        'water':   'Cooling Yard',
+        'diesel':  'Substation',
+        'subsidy': 'Community Development'
+      };
+      const r = roomOf[pu.key];
+      if(r){
+        gs.clearedRooms = gs.clearedRooms || {};
+        gs.clearedRooms[r] = true;
+      }
       // Substation ambush on the diesel exhibit.
       if(pu.key === 'diesel' && gs.substationTrap && gs.substationTrap.state === 'inactive'){
         triggerSubstationTrap();
       }
-      // Catwalk power-down on the grid exhibit: Building A goes quiet —
-      // music fades over 5s, rack LEDs die off, smoke rises from the racks.
       if(pu.key === 'grid') triggerCatwalkPowerDown();
-      // Cooling Yard wind-down on the water exhibit: music-box-running-
-      // out collapse + the automaton stops dancing + lights fade.
       if(pu.key === 'water') triggerCoolingWindDown();
       if(allEvidence() && !gs.bossSpawned){
         spawnBoss();
@@ -6087,13 +6346,17 @@ function escapeHTML(s){
 }
 
 function allEvidence(){
-  return gs.evidence.water && gs.evidence.diesel && gs.evidence.subsidy && gs.evidence.grid;
+  // Community Development is cut in this build — three exhibits now.
+  return gs.evidence.water && gs.evidence.diesel && gs.evidence.grid;
 }
 function updateObjectiveFromEvidence(){
-  const remaining = Object.keys(gs.evidenceMeta).filter(k=>!gs.evidence[k]);
-  if(remaining.length===0){ setObjective('Return to the lobby — the Compliance Engine has been deployed.'); return; }
-  const count = 4-remaining.length;
-  setObjective('Compile the administrative record ('+count+'/4 exhibits secured).');
+  const keys = ['water','diesel','grid'];
+  const count = keys.filter(k=>gs.evidence[k]).length;
+  if(count === keys.length){
+    setObjective('Return to the lobby — the Compliance Engine has been deployed.');
+    return;
+  }
+  setObjective('Compile the administrative record ('+count+'/3 exhibits secured).');
 }
 
 function spawnBoss(){
@@ -6813,15 +7076,23 @@ function drawMinimap(){
   const scale = 1.6;
   const cx = W/2 - gs.player.pos.x*scale;
   const cy = H/2 + gs.player.pos.z*scale;
+  // The Community Development room and receptor perimeter are cut —
+  // filter those walls/pickups/enemies out of the drawn map so nothing
+  // south of the lobby shows. Everything at z <= -12 would be in the
+  // removed area.
+  const MIN_Z_VISIBLE = -12;
+  const visibleOnMap = (zc) => zc >= MIN_Z_VISIBLE;
   mapCtx.strokeStyle = 'rgba(142,227,156,0.35)';
   mapCtx.lineWidth = 1;
   for(const w of gs.walls){
+    if(!visibleOnMap(w.maxZ)) continue;
     const x1 = cx + w.minX*scale, y1 = cy - w.minZ*scale;
     const x2 = cx + w.maxX*scale, y2 = cy - w.maxZ*scale;
     mapCtx.strokeRect(x1, y2, x2-x1, y1-y2);
   }
   for(const pu of gs.pickups){
     if(!pu.active) continue;
+    if(!visibleOnMap(pu.pos.z)) continue;
     mapCtx.fillStyle = '#ffb13d';
     mapCtx.beginPath();
     mapCtx.arc(cx + pu.pos.x*scale, cy - pu.pos.z*scale, 3, 0, Math.PI*2);
@@ -6829,6 +7100,7 @@ function drawMinimap(){
   }
   for(const e of gs.enemies){
     if(!e.alive) continue;
+    if(!visibleOnMap(e.pos.z)) continue;
     mapCtx.fillStyle = e.type==='boss'?'#ff40c0':'#ff3040';
     mapCtx.beginPath();
     mapCtx.arc(cx + e.pos.x*scale, cy - e.pos.z*scale,
@@ -6865,11 +7137,7 @@ function spawnInitialEnemies(){
   gs.enemies.push(new Enemy('drone', new THREE.Vector3(6, 2, 40)));
   gs.enemies.push(new Enemy('bot',   new THREE.Vector3(0, 0, 44)));
   spawnTurret(0, 46);     // cooling
-  // Community Dev — tucked into the far corners so they aren't in direct
-  // line-of-sight from the lobby spawn (the Corr S doorway gap at x=±3
-  // would otherwise let them chase the player from behind at spawn).
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(-9, 0, -40)));
-  gs.enemies.push(new Enemy('drone', new THREE.Vector3(9, 2, -40)));
+  // (Community Development enemies removed — room is cut from this build.)
 }
 
 function spawnTurret(x, z){
