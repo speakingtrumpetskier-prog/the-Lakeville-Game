@@ -1926,37 +1926,61 @@ function buildNetworkGraph(){
   // ---- Floor spine ----
   const F = (x1,z1,x2,z2, opts) => addNetSegment(x1,0.035,z1, x2,0.035,z2, opts);
 
-  // EAST-WEST SPINE — split at lobby boundaries so each room's segment
-  // takes its own room's color. The lobby portion is further split at x=0
-  // so the west half can dim independently from the east half once the
-  // corresponding destination room has been cleared.
-  F(-53.9, 0, -12, 0);       // Substation + Corr W
-  F(-12,   0,   0, 0, { leadsTo:'Substation' });                  // lobby W half
-  F(  0,   0,  12, 0, { leadsTo:'Building A — Light Industrial' }); // lobby E half
-  F( 12,   0, 55.9, 0);      // Corr E + Building A
+  // CORRIDORS + DESTINATION SPINES — these are the "outside the lobby"
+  // runs. Each starts at the lobby boundary and goes into its corridor
+  // and room. Tagging is implicit via classifyRoomByPoint on the midpoint.
+  F(-53.9, 0, -12.01, 0);    // Substation + Corr W (stops at lobby east wall)
+  F( 12.01, 0, 55.9, 0);     // Corr E + Building A
+  F(0, -42.9, 0, -12.01);    // South corridor (dead arm — outside lobby)
+  F(0,  12.01, 0, 20, { onPath:true, pathIndex:0 });
+  F(0, 20, 0, 34, { onPath:true, pathIndex:1 });
+  F(0, 34, 0, 48, { onPath:true, pathIndex:2 });
+  F(0, 48, 0, 56, { onPath:true, pathIndex:3 });
+  F(0, 56, 0, 66.9, { onPath:true, pathIndex:4 });
 
-  // NORTH-SOUTH SPINE — both lobby halves point to Cooling Yard so that
-  // clearing Cooling dims a whole third of the lobby (both the north line
-  // leading out AND the south decorative spur balanced with it).
-  F(0, -42.9, 0, -12);                                  // (dead arm — outside lobby, unused)
-  F(0, -12,   0,  4, { leadsTo:'Cooling Yard' });       // lobby south spur (N bucket)
-  F(0,  4, 0, 12, { onPath:true, pathIndex:0, leadsTo:'Cooling Yard' });
-  F(0, 12, 0, 20, { onPath:true, pathIndex:1 });
-  F(0, 20, 0, 34, { onPath:true, pathIndex:2 });
-  F(0, 34, 0, 48, { onPath:true, pathIndex:3 });
-  F(0, 48, 0, 56, { onPath:true, pathIndex:4 });
-  F(0, 56, 0, 66.9, { onPath:true, pathIndex:5 });
+  // ---- LOBBY TREE ----
+  // Desk → center trunk, plus three branch groups (N / E / W). Each
+  // branch group is two parallel crackling "lightning" paths that
+  // terminate at the corresponding corridor mouth (lobby wall at ±12
+  // on the relevant axis). The trunk is tagged 'accent' so it dims
+  // only when ALL three rooms have been cleared; each branch group
+  // is tagged with its room so clearing that room snuffs just that
+  // branch.
+  const zigzag = (x1, z1, x2, z2, steps, jitter, opts) => {
+    const dx = x2 - x1, dz = z2 - z1;
+    const len = Math.hypot(dx, dz);
+    if(len < 0.01) return;
+    const ux = dx/len, uz = dz/len;
+    const nx = -uz, nz = ux;
+    const pts = [{x:x1, z:z1}];
+    for(let i = 1; i < steps; i++){
+      const t = i / steps;
+      const bx = x1 + dx*t, bz = z1 + dz*t;
+      const sign = (i % 2 === 0) ? 1 : -1;
+      const mag  = jitter * (0.45 + Math.random()*0.55);
+      pts.push({x: bx + nx*sign*mag, z: bz + nz*sign*mag});
+    }
+    pts.push({x:x2, z:z2});
+    for(let i = 0; i < pts.length - 1; i++){
+      F(pts[i].x, pts[i].z, pts[i+1].x, pts[i+1].z, opts);
+    }
+  };
 
-  // LOBBY accents — split into W / E buckets so clearing Substation or
-  // Building A each kills its own vertical accent line + both same-side
-  // corner diagonals. Together with the main spine halves this gives
-  // each of the three rooms its own rough third of the lobby lights.
-  F(-6, -11.9, -6, 11.9, { leadsTo:'Substation' });                    // W vertical
-  F( 6, -11.9,  6, 11.9, { leadsTo:'Building A — Light Industrial' }); // E vertical
-  F(-11.9, -6, -6, -11.9, { leadsTo:'Substation' });                   // SW diag
-  F( 11.9, -6,  6, -11.9, { leadsTo:'Building A — Light Industrial' });// SE diag
-  F(-11.9,  6, -6,  11.9, { leadsTo:'Substation' });                   // NW diag
-  F( 11.9,  6,  6,  11.9, { leadsTo:'Building A — Light Industrial' });// NE diag
+  // Main trunk — reception desk ↘ lobby center. Slightly jagged, mostly
+  // straight. Goes dark only when the third (final) room is cleared.
+  zigzag(0, -10.5, 0, 0, 4, 0.4, { leadsTo: 'accent' });
+
+  // NORTH branch group — two crackling paths to Corr N at (0, 12)
+  zigzag(-0.3, 0, -0.35, 11.9, 6, 1.3, { leadsTo: 'Cooling Yard' });
+  zigzag( 0.3, 0,  0.35, 11.9, 6, 1.3, { leadsTo: 'Cooling Yard' });
+
+  // EAST branch group — two crackling paths to Corr E at (12, 0)
+  zigzag(0, -0.3, 11.9, -0.35, 6, 1.3, { leadsTo: 'Building A — Light Industrial' });
+  zigzag(0,  0.3, 11.9,  0.35, 6, 1.3, { leadsTo: 'Building A — Light Industrial' });
+
+  // WEST branch group — two crackling paths to Corr W at (-12, 0)
+  zigzag(0, -0.3, -11.9, -0.35, 6, 1.3, { leadsTo: 'Substation' });
+  zigzag(0,  0.3, -11.9,  0.35, 6, 1.3, { leadsTo: 'Substation' });
 
   // BUILDING A internal branches — span wall-to-wall at z=±12.9
   F(28, -12.9, 28, 12.9);
@@ -1983,10 +2007,12 @@ function buildNetworkGraph(){
   F(-28, -72, 28, -72);
   F(-12, -88, 12, -88);
 
-  // Victory-path segments are already embedded above (the six F() calls along
-  // the N-S spine with pathIndex:0..5) — no duplicate overlay, so there's no
-  // mismatched brighter stripe at spawn.
-  gs._victoryPathCount = 6;
+  // Victory-path segments are already embedded above (the five F() calls
+  // along the N-S spine with pathIndex:0..4) — no duplicate overlay, so
+  // there's no mismatched brighter stripe at spawn. Path now starts at
+  // the Corr N mouth rather than inside the lobby (the tree handles the
+  // in-lobby beat on clear).
+  gs._victoryPathCount = 5;
 
   // ---- Wall climbs — U-shapes at dramatic doorways ----
   const climbU = (axis, coord, gapCenter, gapWidth, yTop, wallOffset)=>{
