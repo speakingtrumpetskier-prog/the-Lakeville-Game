@@ -1796,6 +1796,76 @@ function addNetFloor(x1, z1, x2, z2, opts={}){
   return _registerSeg(mesh, mat, mid, opts);
 }
 
+// Continuous floor ribbon along a polyline — for the lobby "lightning
+// tree" branches. Single buffer-geometry mesh so jagged/zigzag paths
+// render without the angle-break gaps you get when you chain a bunch of
+// rotated BoxGeometry segments. Each point generates left/right ribbon
+// vertices with a miter-joined perpendicular so width stays constant.
+function addNetFloorPolyline(points, opts={}){
+  if(!points || points.length < 2) return null;
+  const w = opts.width || 0.55;
+  const halfW = w / 2;
+  const y = opts.y !== undefined ? opts.y : 0.035;
+  const n = points.length;
+  const pos = [];
+  const uvs = [];
+  const idx = [];
+  for(let i = 0; i < n; i++){
+    let nxv, nzv;
+    if(i === 0){
+      const dx = points[1].x - points[0].x, dz = points[1].z - points[0].z;
+      const L = Math.hypot(dx, dz) || 1;
+      nxv = -dz / L; nzv = dx / L;
+    } else if(i === n - 1){
+      const dx = points[i].x - points[i-1].x, dz = points[i].z - points[i-1].z;
+      const L = Math.hypot(dx, dz) || 1;
+      nxv = -dz / L; nzv = dx / L;
+    } else {
+      const d1x = points[i].x   - points[i-1].x, d1z = points[i].z   - points[i-1].z;
+      const L1  = Math.hypot(d1x, d1z) || 1;
+      const d2x = points[i+1].x - points[i].x,   d2z = points[i+1].z - points[i].z;
+      const L2  = Math.hypot(d2x, d2z) || 1;
+      const n1x = -d1z / L1, n1z = d1x / L1;
+      const n2x = -d2z / L2, n2z = d2x / L2;
+      let bx = n1x + n2x, bz = n1z + n2z;
+      const BL = Math.hypot(bx, bz) || 1;
+      bx /= BL; bz /= BL;
+      // Miter length — stretch perpendicular so the ribbon keeps its
+      // width across the corner. Clamped so reflex bends don't spike.
+      const mdot = Math.max(0.25, n1x*bx + n1z*bz);
+      const miter = 1 / mdot;
+      nxv = bx * miter; nzv = bz * miter;
+    }
+    pos.push(points[i].x + nxv*halfW, y, points[i].z + nzv*halfW);
+    pos.push(points[i].x - nxv*halfW, y, points[i].z - nzv*halfW);
+    const v = n > 1 ? i / (n - 1) : 0;
+    uvs.push(0, v);
+    uvs.push(1, v);
+  }
+  for(let i = 0; i < n - 1; i++){
+    const a = i*2, b = i*2+1, c = (i+1)*2, d = (i+1)*2+1;
+    idx.push(a, c, b, c, d, b);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('uv',       new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshBasicMaterial({
+    map: NET_GLOW_H,        // H gradient runs across the ribbon width (UV x)
+    color: 0x181c20,
+    transparent: true, opacity: 0.55,
+    blending: THREE.AdditiveBlending, depthWrite: false
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = 3;
+  scene.add(mesh);
+  // Midpoint for room classification = middle vertex of the polyline.
+  const midP = points[Math.floor(n / 2)];
+  const mid = new THREE.Vector3(midP.x, y, midP.z);
+  return _registerSeg(mesh, mat, mid, opts);
+}
+
 // Wall jamb (vertical line embedded in wall face). normalAxis = 'x' or 'z' says
 // which axis is perpendicular to the wall surface; faceSign = +1 or -1 is which
 // side of that surface the line lights up.
@@ -1940,13 +2010,14 @@ function buildNetworkGraph(){
 
   // ---- LOBBY TREE ----
   // Desk → center trunk, plus three branch groups (N / E / W). Each
-  // branch group is two parallel crackling "lightning" paths that
-  // terminate at the corresponding corridor mouth (lobby wall at ±12
-  // on the relevant axis). The trunk is tagged 'accent' so it dims
-  // only when ALL three rooms have been cleared; each branch group
-  // is tagged with its room so clearing that room snuffs just that
-  // branch.
-  const zigzag = (x1, z1, x2, z2, steps, jitter, opts) => {
+  // branch group is two parallel crackling "lightning" paths that fan
+  // out from close together at center to wider apart at the corridor
+  // mouth — so each branch reads like a forked bolt rather than two
+  // parallel rails. Each path is a SINGLE continuous ribbon mesh
+  // (addNetFloorPolyline) so there are no angle-break gaps between
+  // zigzag segments. Trunk → 'accent' (dims only on the third clear);
+  // each branch group → its room (dims on that single clear).
+  const zigzagPath = (x1, z1, x2, z2, steps, jitter, opts) => {
     const dx = x2 - x1, dz = z2 - z1;
     const len = Math.hypot(dx, dz);
     if(len < 0.01) return;
@@ -1961,26 +2032,44 @@ function buildNetworkGraph(){
       pts.push({x: bx + nx*sign*mag, z: bz + nz*sign*mag});
     }
     pts.push({x:x2, z:z2});
-    for(let i = 0; i < pts.length - 1; i++){
-      F(pts[i].x, pts[i].z, pts[i+1].x, pts[i+1].z, opts);
-    }
+    addNetFloorPolyline(pts, { ...opts, width: 0.45 });
   };
 
   // Main trunk — reception desk ↘ lobby center. Slightly jagged, mostly
-  // straight. Goes dark only when the third (final) room is cleared.
-  zigzag(0, -10.5, 0, 0, 4, 0.4, { leadsTo: 'accent' });
+  // straight, single ribbon. Dims only when the third room is cleared.
+  zigzagPath(0, -10.5, 0, 0, 4, 0.35, { leadsTo: 'accent' });
 
-  // NORTH branch group — two crackling paths to Corr N at (0, 12)
-  zigzag(-0.3, 0, -0.35, 11.9, 6, 1.3, { leadsTo: 'Cooling Yard' });
-  zigzag( 0.3, 0,  0.35, 11.9, 6, 1.3, { leadsTo: 'Cooling Yard' });
+  // Helper for a forked branch: two crackling paths, starting close
+  // together at `start` and ending well apart near the corridor mouth.
+  const fork = (sx, sz, ex, ez, perpSpread, steps, jitter, opts) => {
+    // Compute perpendicular offsets at start (narrow) and end (wide).
+    const dx = ex - sx, dz = ez - sz;
+    const L = Math.hypot(dx, dz) || 1;
+    const nx = -dz / L, nz = dx / L;
+    const innerSpread = 0.25;
+    // Left path
+    zigzagPath(
+      sx + nx * innerSpread,  sz + nz * innerSpread,
+      ex + nx * perpSpread,   ez + nz * perpSpread,
+      steps, jitter, opts
+    );
+    // Right path
+    zigzagPath(
+      sx - nx * innerSpread,  sz - nz * innerSpread,
+      ex - nx * perpSpread,   ez - nz * perpSpread,
+      steps, jitter, opts
+    );
+  };
 
-  // EAST branch group — two crackling paths to Corr E at (12, 0)
-  zigzag(0, -0.3, 11.9, -0.35, 6, 1.3, { leadsTo: 'Building A — Light Industrial' });
-  zigzag(0,  0.3, 11.9,  0.35, 6, 1.3, { leadsTo: 'Building A — Light Industrial' });
+  // NORTH branch → Corr N mouth at (0, 11.9), forked paths ending ±2.5
+  // apart (the Corr N gap is 6 wide so ±2.5 still fits inside).
+  fork(0, 0, 0, 11.9, 2.5, 6, 1.4, { leadsTo: 'Cooling Yard' });
 
-  // WEST branch group — two crackling paths to Corr W at (-12, 0)
-  zigzag(0, -0.3, -11.9, -0.35, 6, 1.3, { leadsTo: 'Substation' });
-  zigzag(0,  0.3, -11.9,  0.35, 6, 1.3, { leadsTo: 'Substation' });
+  // EAST branch → Corr E mouth at (11.9, 0), forked paths ending ±2.5.
+  fork(0, 0, 11.9, 0, 2.5, 6, 1.4, { leadsTo: 'Building A — Light Industrial' });
+
+  // WEST branch → Corr W mouth at (-11.9, 0), forked paths ending ±2.5.
+  fork(0, 0, -11.9, 0, 2.5, 6, 1.4, { leadsTo: 'Substation' });
 
   // BUILDING A internal branches — span wall-to-wall at z=±12.9
   F(28, -12.9, 28, 12.9);
@@ -5841,6 +5930,19 @@ class Enemy {
     // as an invisible attacker. Drones / boss hover above 1.0 so they're
     // exempt — they can still chase the player up into the walkway.
     if(this.pos.y < 1.0 && p.pos.y > 2.0) return false;
+    // Room-gate: an enemy stationed in a destination room only aggroes
+    // when the player has actually stepped into the same room (or its
+    // connecting corridor, which classifyRoomByPoint maps to the room).
+    // Prevents e.g. the cooling-yard bot from spotting the player all
+    // the way across the lobby through the narrow Corr N sightline and
+    // charging at them before they've entered. The boss is exempt —
+    // once spawned, it chases anywhere. Turrets are stationary so they
+    // already stay confined to their own room.
+    if(this.type !== 'boss'){
+      const myRoom = classifyRoomByPoint(this.pos.x, this.pos.z);
+      const plRoom = classifyRoomByPoint(p.pos.x, p.pos.z);
+      if(myRoom !== plRoom) return false;
+    }
     if(lineHitsWalls(this.pos.x, this.pos.z, p.pos.x, p.pos.z, gs.walls)) return false;
     if(this.type==='boss' || this.type==='turret') return true;
     const d = Math.sqrt(d2);
