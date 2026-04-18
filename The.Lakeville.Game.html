@@ -75,17 +75,18 @@
   #healthText { font-size:12px; margin-top:3px; color:#cfe9d5; }
 
   #controlsHud {
-    position:absolute; right:22px; bottom:22px; width:260px;
+    position:absolute; right:14px; bottom:14px; width:168px;
     font-family: "Consolas","Courier New",monospace;
     text-align:right;
     pointer-events:none;
+    opacity:0.78;
   }
-  #controlsHud .label { font-size:11px; letter-spacing:2px; color:#9fc8a7; margin-bottom:6px; }
-  #controlsHud table { width:100%; border-collapse:collapse; font-size:11px; }
-  #controlsHud td { padding:2px 0; vertical-align:middle; line-height:1.25; }
-  #controlsHud td.key { width:90px; color:#8ee39c; text-align:right; padding-right:10px;
-    letter-spacing:1px; font-weight:600; }
-  #controlsHud td.desc { color:#9fc8a7; text-align:right; opacity:0.8; }
+  #controlsHud .label { font-size:9px; letter-spacing:1.5px; color:#9fc8a7; margin-bottom:3px; }
+  #controlsHud table { width:100%; border-collapse:collapse; font-size:9.5px; }
+  #controlsHud td { padding:0; vertical-align:middle; line-height:1.2; }
+  #controlsHud td.key { width:64px; color:#8ee39c; text-align:right; padding-right:7px;
+    letter-spacing:0.5px; font-weight:600; }
+  #controlsHud td.desc { color:#9fc8a7; text-align:right; opacity:0.85; }
 
   #objective {
     position:absolute; left:50%; top:22px; transform:translateX(-50%);
@@ -371,21 +372,22 @@
     <div id="healthText">100 / 100</div>
   </div>
   <div id="controlsHud">
-    <div class="label">CONTROLS</div>
     <table>
       <tr><td class="key">WASD</td><td class="desc">move</td></tr>
       <tr><td class="key">MOUSE</td><td class="desc">look</td></tr>
-      <tr><td class="key">LMB / SHIFT</td><td class="desc">EMP pulse</td></tr>
-      <tr><td class="key">RMB (hold)</td><td class="desc">charged burst</td></tr>
-      <tr><td class="key">E</td><td class="desc">interact / collect</td></tr>
-      <tr><td class="key">F</td><td class="desc">flashlight</td></tr>
-      <tr><td class="key">SHIFT</td><td class="desc">sprint (+ fire)</td></tr>
+      <tr><td class="key">LMB</td><td class="desc">fire</td></tr>
+      <tr><td class="key">RMB</td><td class="desc">charge</td></tr>
+      <tr><td class="key">SHIFT</td><td class="desc">sprint / EMP</td></tr>
       <tr><td class="key">SPACE</td><td class="desc">jump</td></tr>
+      <tr><td class="key">E</td><td class="desc">interact</td></tr>
+      <tr><td class="key">F</td><td class="desc">flashlight</td></tr>
       <tr><td class="key">ESC</td><td class="desc">pause</td></tr>
     </table>
   </div>
   <canvas id="minimap" width="180" height="180"></canvas>
-  <div id="batteryWrap">
+  <!-- Battery UI retired — flashlight is now permanent; see updatePlayer()
+       for the scheduled creep-flicker replacement. -->
+  <div id="batteryWrap" style="display:none">
     <div class="row"><span>FLASHLIGHT</span><span id="batteryPct">100%</span></div>
     <div id="batteryBar"><div id="batteryFill"></div></div>
   </div>
@@ -3662,11 +3664,17 @@ function updateCoolingAutomaton(dt){
   a.armSwayPhase += dt * (0.6 + a.rotationSpeed * 2.0);
   const raise = Math.max(0, (a.rotationSpeed / 0.5));
 
-  for(let i=0; i<a.arms.length; i++){
-    const side = i === 0 ? -1 : 1;
-    const bob = Math.sin(a.armSwayPhase + side*0.6) * 0.18;
-    a.arms[i].group.rotation.z = bob * raise;
-    a.arms[i].group.rotation.y = side * Math.sin(a.armSwayPhase) * 0.12 * raise;
+  // Only pose the arms while dancing. After wind-down the arms are left in
+  // their final dangled position — running this loop during 'dead' would
+  // overwrite the slump and bounce the hands back up to their neutral
+  // slightly-above-horizontal resting pose.
+  if(a.state === 'dancing'){
+    for(let i=0; i<a.arms.length; i++){
+      const side = i === 0 ? -1 : 1;
+      const bob = Math.sin(a.armSwayPhase + side*0.6) * 0.18;
+      a.arms[i].group.rotation.z = bob * raise;
+      a.arms[i].group.rotation.y = side * Math.sin(a.armSwayPhase) * 0.12 * raise;
+    }
   }
 
   // Firework emitters — dispatch sparks from the anchor points while
@@ -3761,11 +3769,18 @@ function updateCoolingAutomaton(dt){
       }
     }
 
-    // Arms crumple with dying twitch
+    // Arms crumple with dying twitch, then dangle fully downward.
+    // Final angle is ~1.35 rad (~77°) so hands hang at the sides rather
+    // than poking outward-and-up. Also zero out rotation.y so the
+    // dance-twist doesn't linger as a weird cocked posture.
     for(let i=0; i<a.arms.length; i++){
       const side = i === 0 ? -1 : 1;
       const jitter = k < 0.6 ? (Math.random()-0.5)*0.25*(1-k) : 0;
-      a.arms[i].group.rotation.z = -side * Math.min(0.7, k * 0.7) + jitter;
+      const targetDroop = 1.35;
+      a.arms[i].group.rotation.z = -side * Math.min(targetDroop, k * targetDroop) + jitter;
+      // Untwist shoulder axis progressively
+      const curY = a.arms[i].group.rotation.y;
+      a.arms[i].group.rotation.y = curY * Math.max(0, 1 - k * 2.0);
     }
 
     // Emitter lights fade
@@ -4705,7 +4720,7 @@ function updateHiddenReveals(dt){
   if(!camera) return;
   const camPos = camera.position;
   const camFwd = new THREE.Vector3(0,0,-1).applyEuler(camera.rotation).normalize();
-  const flashOn = input.flashlight && gs.player.battery > 0;
+  const flashOn = input.flashlight;
   for(const r of gs.hiddenReveals){
     if(r.collected) continue;
     const dx = r.pos.x - camPos.x, dy = r.pos.y - camPos.y, dz = r.pos.z - camPos.z;
@@ -6334,29 +6349,44 @@ function updatePlayer(dt){
   camera.rotation.y = p.yaw;
   camera.rotation.x = p.pitch;
 
-  // Flashlight battery drain + passive recharge
-  if(input.flashlight && p.battery > 0){
-    p.battery = Math.max(0, p.battery - dt);
-    if(p.battery === 0) input.flashlight = false;
-  } else if(!input.flashlight && p.battery < p.batteryMax){
-    // Faster recharge — still slower than drain (1.0/sec) but no longer
-    // punishing to use the light tactically.
-    p.battery = Math.min(p.batteryMax, p.battery + dt * 1.1);
-  }
+  // Flashlight is always available — no battery, no drain. Just on/off
+  // via F. Occasional scripted flicker bursts (~every 45-90s while on)
+  // provide the creep beat that the depletion mechanic used to carry.
   p.flashlight.visible = input.flashlight;
   if(p.fillLight) p.fillLight.visible = input.flashlight;
-  const pct = Math.round((p.battery / p.batteryMax)*100);
-  $('batteryPct').textContent = pct + '%';
-  $('batteryFill').style.width = pct + '%';
-  const bw = $('batteryWrap');
-  bw.classList.toggle('low', pct < 25);
-  bw.classList.toggle('off', !input.flashlight);
-  // Flicker near depletion
-  if(input.flashlight && p.battery > 0 && p.battery < 8){
-    const flick = Math.random() < (0.12 + (8-p.battery)/8*0.2);
-    p.flashlight.intensity = flick ? 0.4 : 7.5;
-  } else if(input.flashlight){
-    p.flashlight.intensity = 7.5;
+  if(input.flashlight){
+    // Schedule the next flicker window the first time we see the light on.
+    if(p._nextFlickerAt === undefined){
+      p._nextFlickerAt = gs.time + 25 + Math.random()*25;   // first one sooner
+    }
+    if(p._flickerBurst){
+      // Active flicker burst — duration 0.7-1.3s of chaotic dim/bright
+      // stutter that then resolves back to full brightness.
+      p._flickerBurst.elapsed += dt;
+      const b = p._flickerBurst;
+      if(b.elapsed >= b.duration){
+        p._flickerBurst = null;
+        p.flashlight.intensity = 7.5;
+        p._nextFlickerAt = gs.time + 45 + Math.random()*45;
+      } else {
+        const phase = Math.random();
+        // Mix of deep dips and bright flares so the player notices
+        p.flashlight.intensity = phase < 0.35 ? 0.25 :
+                                  phase < 0.7  ? 9.5 :
+                                                 3.2;
+      }
+    } else if(gs.time >= p._nextFlickerAt){
+      p._flickerBurst = { elapsed: 0, duration: 0.7 + Math.random()*0.6 };
+      // Subtle audible click would be nice but keep silent for now to
+      // avoid adding a new sfx; the visual change is already noticeable.
+    } else {
+      p.flashlight.intensity = 7.5;
+    }
+  } else {
+    // Reset so turning on again plays clean, and the next flicker is
+    // spaced from re-activation rather than whenever it was scheduled.
+    p._flickerBurst = null;
+    p._nextFlickerAt = undefined;
   }
 
   if(input.firing && (gs.time - p.lastFireTime) > WEAPON_COOLDOWN){
