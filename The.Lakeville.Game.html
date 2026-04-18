@@ -1699,8 +1699,12 @@ function buildLevel(){
   // Two-line sign so the text doesn't overrun the 6-unit-wide door.
   // Plane width is 5.2 (0.4m margin on each side) so the sign is
   // guaranteed to sit on the door face and not bleed into the wall.
+  // Y lowered to 2.9 — plane top (y=3.675) clears the 3.9 doorframe
+  // header by a comfortable margin, so the sign isn't clipped from any
+  // viewing angle. Roughly eye-height + a bit, reads as posted
+  // signage rather than a transom.
   const sign = makeTwoLineSignMesh('FILING', 'AUTH REQUIRED', 0xffc040);
-  sign.position.set(0, 3.55, 47.78);
+  sign.position.set(0, 2.9, 47.78);
   sign.rotation.y = Math.PI;
   scene.add(sign);
 }
@@ -2706,21 +2710,27 @@ function makeTwoLineSignMesh(line1, line2, color=0x8ee39c, opts={}){
   }
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  // Auto-fit so BOTH lines fit inside the canvas with margin
-  let fontSize = 92;
-  const maxWidth = W - 90;
+  // Auto-fit so BOTH lines fit inside the canvas with margin. Starting
+  // fontSize is lower than the single-line variant (72 vs 110) so the
+  // two lines never butt up against the top/bottom borders — the prior
+  // 92 starting size pushed line 1 ascenders within a few pixels of
+  // the top frame at close-up viewing angles.
+  let fontSize = 72;
+  const maxWidth = W - 100;
   do {
     g.font = 'bold '+fontSize+'px Consolas, "Segoe UI", monospace';
     const w1 = g.measureText(line1).width;
     const w2 = g.measureText(line2).width;
     if(Math.max(w1, w2) <= maxWidth) break;
     fontSize -= 4;
-  } while(fontSize > 28);
+  } while(fontSize > 24);
   g.fillStyle = hex;
   g.shadowColor = hex;
   g.shadowBlur  = 6;    // gentler than the single-line sign's 12
-  g.fillText(line1, W/2, H/2 - fontSize*0.58);
-  g.fillText(line2, W/2, H/2 + fontSize*0.58);
+  // Use 0.55 instead of 0.58 so line 1 sits a hair closer to center,
+  // widening the top margin.
+  g.fillText(line1, W/2, H/2 - fontSize*0.55);
+  g.fillText(line2, W/2, H/2 + fontSize*0.55);
   g.shadowBlur = 0;
   const tex = new THREE.CanvasTexture(c);
   tex.anisotropy = 8;
