@@ -2275,8 +2275,8 @@ function triggerWatchingRipple(){
       }, 620 + Math.random()*280);
     }, i * (80 + Math.random()*60));
   });
-  audio.tone({freq: 260, dur: 0.7, type: 'sine', vol: 0.055});
-  audio.tone({freq: 392, dur: 0.5, type: 'sine', vol: 0.04});
+  // (Intentionally silent — the visual ripple carries the cue. The prior
+  // mid-pitch sine pair was reading as a random thump every ~30s.)
 }
 
 function addDoorframe(axis, coord, gapCenter, width, color=0x8ee39c, h=4.2){
@@ -3656,11 +3656,15 @@ function updateCoolingAutomaton(dt){
   }
 
   // Firework emitters — dispatch sparks from the anchor points while
-  // dancing. Rate scales with rotation speed: spinning harder = more
-  // sparks. Colors oscillate through cyan / pale blue / warm white.
+  // dancing. Rate is tied to rotation speed and metered by an accumulator
+  // so it stays framerate-independent. Much gentler than before: 2-10 per
+  // second overall, longer-lived, smaller, with soft drift rather than a
+  // hard outward spray — the being is exhaling embers, not erupting.
   if(a.state === 'dancing' && a.emitterLocals){
-    const cnt = Math.max(0, Math.floor(a.rotationSpeed * 5));
-    for(let i=0; i<cnt; i++){
+    const rate = 2 + a.rotationSpeed * 8;                // particles/sec
+    a._emitAcc = (a._emitAcc || 0) + dt * rate;
+    while(a._emitAcc >= 1){
+      a._emitAcc -= 1;
       const anchor = a.emitterLocals[Math.floor(Math.random()*a.emitterLocals.length)];
       const local = new THREE.Vector3(anchor.x, anchor.y, anchor.z);
       a.turntable.updateMatrixWorld();
@@ -3668,14 +3672,14 @@ function updateCoolingAutomaton(dt){
       const palette = [0x7ee5ff, 0xcbf5ff, 0xa0e4ff, 0xffd090];
       const color = palette[Math.floor(Math.random()*palette.length)];
       spawnParticle(
-        world.x + (Math.random()-0.5)*0.06,
-        world.y + (Math.random()-0.5)*0.04,
-        world.z + (Math.random()-0.5)*0.06,
-        (Math.random()-0.5) * (1.5 + a.rotationSpeed),
-        0.4 + Math.random() * (1.2 + a.rotationSpeed * 0.6),
-        (Math.random()-0.5) * (1.5 + a.rotationSpeed),
+        world.x + (Math.random()-0.5)*0.05,
+        world.y + (Math.random()-0.5)*0.03,
+        world.z + (Math.random()-0.5)*0.05,
+        (Math.random()-0.5) * 0.6,
+        0.18 + Math.random() * 0.55,
+        (Math.random()-0.5) * 0.6,
         color,
-        0.55 + Math.random()*0.4, 0.06
+        1.3 + Math.random()*0.9, 0.038
       );
     }
   }
@@ -3759,23 +3763,39 @@ function updateCoolingAutomaton(dt){
       }
     }
 
-    // Solid bright nodes (heart, jewel, mouth, hands) fade
+    // Solid bright nodes (heart, jewel, mouth, hands) fade but floor at a
+    // faint residual glow — pitch black orbs stop reading as "eyes/heart"
+    // and look like floating debris. Keep them just barely visible.
     if(a.solidMats){
+      const solidFloor = 0.22;  // residual brightness at dead end
+      const nodeBright = solidFloor + (1 - solidFloor) * dim;
       for(const m of a.solidMats){
         if(m._origColor === undefined) m._origColor = m.color.clone();
-        m.color.copy(m._origColor).multiplyScalar(dim);
+        m.color.copy(m._origColor).multiplyScalar(nodeBright);
         if(m.opacity !== undefined && m.transparent){
           if(m._origOp === undefined) m._origOp = m.opacity;
-          m.opacity = m._origOp * dim;
+          m.opacity = m._origOp * nodeBright;
         }
       }
     }
-    // Wire edges — shake opacity erratically early, then fade
+    // Wire edges — shake opacity erratically early, then fade. Floor at
+    // 0.3 × orig so the wire cage is still traceable when dark: this is
+    // what prevents the "floating orbs in void" failure mode.
     if(a.wireMats){
+      const wireFloor = 0.3;
+      const wireVisible = wireFloor + (1 - wireFloor) * dim;
       for(const m of a.wireMats){
         if(m._origOp === undefined) m._origOp = m.opacity;
-        const shake = k < 0.6 ? (0.3 + Math.random()*0.7) : 1;
-        m.opacity = m._origOp * shake * dim;
+        const shake = k < 0.6 ? (0.5 + Math.random()*0.5) : 1;
+        m.opacity = m._origOp * shake * wireVisible;
+      }
+    }
+    // Solid silhouette skin — stays mostly on (only slight dim), because
+    // it IS the depth cue that holds the figure together in darkness.
+    if(a.silMats){
+      for(const m of a.silMats){
+        if(m._origOp === undefined) m._origOp = m.opacity;
+        m.opacity = m._origOp * (0.7 + 0.3 * dim);
       }
     }
     // Dying sparks — sparse, stuttering
@@ -4232,6 +4252,29 @@ function decorateCooling(){
   turntable.position.y = 0.12;
   automaton.add(turntable);
 
+  // SOLID SILHOUETTE — a dim interior skeleton that's visible even when
+  // the room goes fully dark. Prevents the "floating orbs" look during
+  // wind-down: the bright nodes always sit on a visible body, not in void.
+  // Uses MeshBasicMaterial so it's unaffected by scene lighting.
+  const silMats = [];
+  const silhouetteMat = new THREE.MeshBasicMaterial({
+    color: 0x14202c, transparent: true, opacity: 0.72
+  });
+  silMats.push(silhouetteMat);
+  // Solid tapered torso core — sits INSIDE the wireframe cage so the cage
+  // still reads. Slightly thinner so the wire cage is visible around it.
+  const silTorso = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.26, 0.38, 1.55, 10), silhouetteMat);
+  silTorso.position.y = 0.9; turntable.add(silTorso);
+  // Solid head core — slightly smaller than the wire headCage so rims show.
+  const silHead = new THREE.Mesh(
+    new THREE.SphereGeometry(0.23, 12, 9), silhouetteMat);
+  silHead.position.y = 1.98; turntable.add(silHead);
+  // Solid neck stub — ties head to body so they don't look disjointed
+  const silNeck = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1, 0.14, 0.2, 8), silhouetteMat);
+  silNeck.position.y = 1.78; turntable.add(silNeck);
+
   // Body wireframe — tall cage cylinder built from EdgesGeometry
   const bodyEdges = new THREE.EdgesGeometry(new THREE.CylinderGeometry(0.32, 0.45, 1.6, 14, 4));
   const body = new THREE.LineSegments(bodyEdges, wireMat.clone());
@@ -4262,12 +4305,41 @@ function decorateCooling(){
     turntable.add(spoke);
   }
 
-  // Arms — wireframe elbow bones
+  // Arms — wireframe bones + dim solid bones behind them (so the hand and
+  // elbow orbs look like they're mounted on something when the lights die).
   const arms = [];
   for(const side of [-1, 1]){
     const armGroup = new THREE.Group();
     armGroup.position.set(side * 0.32, 1.55, 0);
     turntable.add(armGroup);
+    // --- Solid dim bones (silhouette) ---
+    // Upper arm bone
+    const upperLen = 0.55;
+    const silUpper = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.05, upperLen, 8), silhouetteMat);
+    silUpper.position.set(side * upperLen/2, 0, 0);
+    silUpper.rotation.z = Math.PI/2;
+    armGroup.add(silUpper);
+    // Forearm bone
+    const foreDx = 0.43, foreDy = 0.18;
+    const foreLen = Math.hypot(foreDx, foreDy);
+    const silFore = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.04, 0.045, foreLen, 8), silhouetteMat);
+    silFore.position.set(side * (upperLen + foreDx/2), foreDy/2, 0);
+    silFore.rotation.z = Math.PI/2 - Math.atan2(foreDy, foreDx) * side;
+    armGroup.add(silFore);
+    // Solid elbow mount
+    const silElbow = new THREE.Mesh(
+      new THREE.SphereGeometry(0.075, 10, 8), silhouetteMat);
+    silElbow.position.set(side * upperLen, 0, 0);
+    armGroup.add(silElbow);
+    // Solid hand mount (behind the glowing hand orb)
+    const silHand = new THREE.Mesh(
+      new THREE.SphereGeometry(0.065, 10, 8), silhouetteMat);
+    silHand.position.set(side * 0.98, 0.18, 0);
+    armGroup.add(silHand);
+
+    // --- Wireframe overlays ---
     // Upper arm bone — a single line with endcap dots
     const upperGeo = new THREE.BufferGeometry();
     upperGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
@@ -4367,6 +4439,7 @@ function decorateCooling(){
     windStart: 0,
     windDuration: 10.0,
     wireMats,
+    silMats,
     eyeMats,
     solidMats: [heartMat, jewelMat, mouthMat,
       arms[0].hand.material, arms[1].hand.material],
@@ -5827,21 +5900,16 @@ class Enemy {
     if(!this.alive && !this._dyingStart) return;
     this.alive = false;
     audio.enemyDie();
-    // Smaller initial puff — the big explosion is saved for the FINAL
-    // moment so the crumple can play out first. Just a few sparks now.
+    // Initial spark burst at the hit point — the lights going out and the
+    // flicker-out carry the death cue. No expanding ring, no slump.
     spawnSparks(this.pos.x, this.pos.y + 0.9, this.pos.z,
       this.type==='boss' ? 0xff40c0 : 0xff8040,
-      this.type==='boss' ? 10 : 4);
-    // Start a death ANIMATION rather than removing the mesh immediately.
-    // The enemy's update() loop handles crumple + mesh removal at the end.
+      this.type==='boss' ? 10 : 5);
     this._dyingStart = gs.time;
-    this._dyingDuration = this.type === 'boss' ? 2.2 :
-                          this.isInspector   ? 1.8 : 1.2;
-    // Random tilt direction so a row of bots doesn't crumple identically.
-    this._tiltDir = Math.random() < 0.5 ? -1 : 1;
-    this._tiltAmount = 0.4 + Math.random()*0.35;
-    // Snapshot every child material's opacity so we can fade smoothly.
-    // Also flip each to transparent and darken emissives.
+    this._dyingDuration = this.type === 'boss' ? 1.4 :
+                          this.isInspector   ? 1.0 : 0.75;
+    // Snapshot every child material's original opacity so the flicker
+    // routine can snap them between "on" (original) and "off" (0).
     this.mesh.traverse(o => {
       if(o.material){
         const m = o.material;
@@ -5855,13 +5923,19 @@ class Enemy {
         }
       }
     });
-    // Kill any attached lights right away — eyes go out first.
+    // Lights out IMMEDIATELY: attached point lights, emissive intensities,
+    // and bright visor/eye MeshBasic colors all go dark at death t=0.
     this.mesh.traverse(o => {
       if(o.isPointLight){ o.intensity = 0; }
-      // Visor/eye meshes use MeshBasicMaterial with bright colors — darken.
-      if(o.material && o.material.isMeshBasicMaterial){
-        if(o.material._deathStartColor === undefined && o.material.color){
-          o.material._deathStartColor = o.material.color.clone();
+      if(o.material){
+        if(o.material.emissiveIntensity !== undefined){
+          o.material.emissiveIntensity = 0;
+        }
+        if(o.material.isMeshBasicMaterial && o.material.color){
+          if(o.material._deathStartColor === undefined){
+            o.material._deathStartColor = o.material.color.clone();
+          }
+          o.material.color.setRGB(0, 0, 0);
         }
       }
     });
@@ -5881,51 +5955,53 @@ class Enemy {
       });
     }
   }
-  // Called from update() while this._dyingStart is set. Sinks + tilts
-  // the mesh, fades materials, darkens eyes/visor, then a final puff +
-  // remove at the end.
+  // Called from update() while this._dyingStart is set. Plays a short
+  // "lights already out, now flicker and go" sequence: a couple of spark
+  // puffs, irregular on/off opacity flickers that get emptier over time,
+  // then disappear. No tilt, no sink, no expanding ring.
   _updateDeathAnim(dt){
     const el = gs.time - this._dyingStart;
-    const dur = this._dyingDuration || 1.2;
+    const dur = this._dyingDuration || 0.75;
     const k = Math.min(1, el / dur);
-    // Sink toward floor
+    // Stay put — no tilt, no sink, no scale change.
     this.mesh.position.copy(this.pos);
-    this.mesh.position.y = this.pos.y - k * 0.6;
-    // Tilt
-    this.mesh.rotation.z = this._tiltDir * this._tiltAmount * k;
-    // Subtle slump in y
-    this.mesh.scale.y = 1 - k * 0.25;
-    // Crumple shakes in the first ~40% of the death
-    if(k < 0.4){
-      const shake = (0.4 - k) * 0.1;
-      this.mesh.position.x += (Math.random()-0.5) * shake;
-      this.mesh.position.z += (Math.random()-0.5) * shake;
+
+    // Small spark puffs at two moments so something keeps moving while
+    // the body is flickering.
+    if(!this._sparkedMid1 && k > 0.25){
+      this._sparkedMid1 = true;
+      spawnSparks(this.pos.x + (Math.random()-0.5)*0.3,
+                  this.pos.y + 0.7, this.pos.z + (Math.random()-0.5)*0.3,
+                  0xff8040, 3);
     }
-    // Fade all materials
+    if(!this._sparkedMid2 && k > 0.55){
+      this._sparkedMid2 = true;
+      spawnSparks(this.pos.x + (Math.random()-0.5)*0.3,
+                  this.pos.y + 0.9, this.pos.z + (Math.random()-0.5)*0.3,
+                  0xff8040, 3);
+    }
+
+    // Flicker on a short cadence — visible ↔ dark. The probability of
+    // being in "off" grows toward the end so the figure eats its own
+    // stutter out to nothing.
+    if(this._nextFlickerAt === undefined || el >= this._nextFlickerAt){
+      this._nextFlickerAt = el + 0.05 + Math.random()*0.1;
+      const offChance = 0.25 + k * 0.6;
+      this._flickerOn = Math.random() > offChance;
+    }
+    const visible = this._flickerOn ? 1 : 0;
     this.mesh.traverse(o => {
       if(o.material && o.material._deathSnap){
         const s = o.material._deathSnap;
-        o.material.opacity = s.opacity * (1 - k*0.85);
-        if(s.emInt !== undefined){
-          o.material.emissiveIntensity = s.emInt * (1 - k);
-        }
-      }
-      if(o.material && o.material._deathStartColor){
-        const c = o.material._deathStartColor;
-        const f = 1 - k;
-        o.material.color.setRGB(c.r * f, c.g * f, c.b * f);
+        o.material.opacity = s.opacity * visible;
       }
     });
-    // A spark puff partway through the crumple
-    if(!this._sparkedMid && k > 0.45){
-      this._sparkedMid = true;
-      spawnSparks(this.pos.x, this.pos.y + 0.6, this.pos.z, 0xff8040, 6);
-    }
-    // Final puff + remove
+
+    // End: one last small spark and remove. No explosion ring.
     if(k >= 1 && this.mesh.parent){
-      spawnExplosion(this.pos.x, this.pos.y+0.4, this.pos.z,
-        this.type==='boss' ? 0xff40c0 : 0xff3040,
-        this.type==='boss' ? 38 : 10);
+      spawnSparks(this.pos.x, this.pos.y + 0.5, this.pos.z,
+        this.type==='boss' ? 0xff40c0 : 0xff8040,
+        this.type==='boss' ? 8 : 4);
       scene.remove(this.mesh);
       this._dyingStart = undefined;
     }
