@@ -4653,12 +4653,15 @@ function buildWireDancer(cx, cy, cz){
 
   // Continuous accel/decel rhythm — each dancer starts mid-phase at a
   // random offset so the four in the same room never drive the same
-  // beat. Top speed and durations vary ~10% per dancer so cycles drift
-  // relative to each other over time.
-  const topSpeed    = 2.5 + Math.random() * 0.5;    // ~2.5–3.0 rad/s
-  const slowSpeed   = 0.35 + Math.random() * 0.15;  // ~0.35–0.5 rad/s
-  const accelDur    = 1.8 + Math.random() * 0.5;    // ~1.8–2.3s ramp up
-  const decelDur    = 0.85 + Math.random() * 0.3;   // ~0.85–1.15s ramp down
+  // beat. Top/slow speeds and durations vary ~10% per dancer so cycles
+  // drift relative to each other over time. Both speed bands are 30%
+  // higher than the previous tuning, and both phase durations are
+  // roughly doubled — the figures wind up further and take longer to
+  // let it out, so you see more of each curve before it flips.
+  const topSpeed    = 3.25 + Math.random() * 0.65;  // ~3.25–3.9 rad/s
+  const slowSpeed   = 0.45 + Math.random() * 0.2;   // ~0.45–0.65 rad/s
+  const accelDur    = 3.6 + Math.random() * 1.0;    // ~3.6–4.6s ramp up
+  const decelDur    = 1.7 + Math.random() * 0.6;    // ~1.7–2.3s ramp down
   const startPhase  = Math.random() < 0.5 ? 'accel' : 'decel';
   const startT      = Math.random() * (startPhase === 'accel' ? accelDur : decelDur);
   // Compute starting rotationSpeed from phase position so the figure
