@@ -3429,7 +3429,10 @@ function substationSpawnInspector(){
     e.substationTrapEnemy = true;
     e.isInspector = true;
     e.mesh.scale.set(1.45, 1.45, 1.45);
-    e.hp = 220; e.maxHp = 220;
+    // Tougher than a standard bot: ~30% more HP than the previous 220
+    // baseline. Armor reads heavier and the fight stretches out — you
+    // have to actually work to drop this one.
+    e.hp = 290; e.maxHp = 290;
     e.attackDamage = 10;
     e.speed = 2.3;
     // REDESIGN: clear the stock bot mesh and rebuild with a custom, more
@@ -3703,34 +3706,89 @@ function updateSubstationTrap(dt){
   if(trap.state === 'resolving'){
     const el = gs.time - trap.resolveStart;
 
-    // Phase 1–2: burning (fire + smoke from the boss's position)
-    if(el < 6.0){
-      if(Math.random() < 0.75){
-        const p = trap.bossFirePos;
+    // Phase 1–3: burning — fire and smoke grow steadily from the boss
+    // over the first 6 seconds, then fade as the sprinklers douse them
+    // over the next ~1.5s. fireI = 0→1 by t=6, then 1→0 by t=7.5.
+    let fireI;
+    if(el < 6.0)       fireI = el / 6.0;
+    else if(el < 7.5)  fireI = 1 - (el - 6.0) / 1.5;
+    else               fireI = 0;
+    fireI = Math.max(0, Math.min(1, fireI));
+    if(fireI > 0){
+      const p = trap.bossFirePos;
+      // Flame column — rate + height + spread all scale with fireI.
+      // Multiple passes per frame at peak so the column reads as a
+      // thick volume, not a handful of dots.
+      const flameBursts = Math.ceil(fireI * 4 + 1);
+      for(let i = 0; i < flameBursts; i++){
+        // Color palette biased toward bright yellow-white at core,
+        // orange-red at outer/higher.
+        const r = Math.random();
+        const color = r < 0.15 ? 0xfff5c8 :     // white-hot core
+                      r < 0.45 ? 0xffc050 :     // yellow
+                      r < 0.80 ? 0xff8025 :     // orange
+                                 0xff3810;      // red
+        const spread = 0.35 + fireI * 0.6;
+        const upV = 1.4 + Math.random() * (1.8 + fireI * 2.2);
         spawnParticle(
-          p.x + (Math.random()-0.5)*0.7,
-          p.y + Math.random()*0.9,
-          p.z + (Math.random()-0.5)*0.7,
-          (Math.random()-0.5)*1.1,
-          1.3 + Math.random()*1.9,
-          (Math.random()-0.5)*1.1,
-          Math.random() < 0.55 ? 0xff5020 : 0xffc050,
-          0.55 + Math.random()*0.3, 0.11
+          p.x + (Math.random()-0.5) * spread,
+          p.y + Math.random() * (0.5 + fireI * 0.8),
+          p.z + (Math.random()-0.5) * spread,
+          (Math.random()-0.5) * (0.8 + fireI * 0.8),
+          upV,
+          (Math.random()-0.5) * (0.8 + fireI * 0.8),
+          color,
+          0.55 + Math.random() * 0.4,
+          0.1 + fireI * 0.08
         );
       }
-      if(Math.random() < 0.35){
-        const p = trap.bossFirePos;
+      // Thick rising smoke — dark columns, spawned less frequently but
+      // bigger and longer-lived than the flames.
+      if(Math.random() < 0.35 + fireI * 0.35){
+        const smokeSpread = 0.6 + fireI * 0.8;
         spawnParticle(
-          p.x + (Math.random()-0.5)*1.0,
-          p.y + 1.3 + Math.random()*0.6,
-          p.z + (Math.random()-0.5)*1.0,
-          (Math.random()-0.5)*0.6,
-          0.35 + Math.random()*0.6,
-          (Math.random()-0.5)*0.6,
-          0x303030,
-          1.8 + Math.random()*0.7, 0.22
+          p.x + (Math.random()-0.5) * smokeSpread,
+          p.y + 1.2 + Math.random() * (0.5 + fireI * 0.7),
+          p.z + (Math.random()-0.5) * smokeSpread,
+          (Math.random()-0.5) * 0.5,
+          0.5 + Math.random() * (0.6 + fireI * 0.5),
+          (Math.random()-0.5) * 0.5,
+          Math.random() < 0.3 ? 0x141414 : 0x2a2a2a,
+          1.8 + Math.random() * 0.9,
+          0.22 + fireI * 0.14
         );
       }
+      // Occasional upward ember — small bright speck that shoots up
+      // above the flames (reads as floating sparks off a real fire)
+      if(Math.random() < 0.15 + fireI * 0.25){
+        spawnParticle(
+          p.x + (Math.random()-0.5)*0.4,
+          p.y + 0.6 + Math.random()*0.8,
+          p.z + (Math.random()-0.5)*0.4,
+          (Math.random()-0.5)*0.6,
+          3.0 + Math.random()*2.5,
+          (Math.random()-0.5)*0.6,
+          Math.random() < 0.5 ? 0xffe090 : 0xff9040,
+          0.9 + Math.random()*0.5, 0.045
+        );
+      }
+      // Pulsing fire light — one PointLight from the pool-ish approach
+      // (create once, keep around through the sequence).
+      if(!trap.fireLight){
+        trap.fireLight = new THREE.PointLight(0xff6020, 0, 10);
+        trap.fireLight.position.set(p.x, p.y + 0.8, p.z);
+        scene.add(trap.fireLight);
+      }
+      // Flicker + scale with fire intensity
+      const flick = 0.75 + Math.random()*0.5;
+      trap.fireLight.intensity = fireI * 4.2 * flick;
+      trap.fireLight.color.setHex(
+        Math.random() < 0.3 ? 0xffa040 : 0xff6020
+      );
+    } else if(trap.fireLight && !trap.fireLightRemoved){
+      trap.fireLightRemoved = true;
+      scene.remove(trap.fireLight);
+      trap.fireLight = null;
     }
 
     // Phase 2: fire alarm setup at t=4s
@@ -3819,6 +3877,28 @@ function updateSubstationTrap(dt){
         trap.ceilLight.light.color.setHex(0x6088aa);
         trap.ceilLight.light.intensity = 0.15;
         trap.ceilLight.base = 0.15;
+      }
+      // Kill the fire light (in case it lingered)
+      if(trap.fireLight){
+        scene.remove(trap.fireLight);
+        trap.fireLight = null;
+      }
+      // Finally remove the inspector corpse — it's been extinguished
+      // by the sprinklers. Small puff of smoke as it disappears.
+      if(trap.inspector && trap.inspector.mesh && trap.inspector.mesh.parent){
+        const p = trap.bossFirePos;
+        for(let i = 0; i < 8; i++){
+          spawnParticle(
+            p.x + (Math.random()-0.5)*0.8,
+            p.y + Math.random()*1.2,
+            p.z + (Math.random()-0.5)*0.8,
+            (Math.random()-0.5)*0.5,
+            0.3 + Math.random()*0.5,
+            (Math.random()-0.5)*0.5,
+            0x1a1a1a, 1.2, 0.2
+          );
+        }
+        scene.remove(trap.inspector.mesh);
       }
     }
   }
@@ -6457,6 +6537,37 @@ class Enemy {
   // puffs, irregular on/off opacity flickers that get emptier over time,
   // then disappear. No tilt, no sink, no expanding ring.
   _updateDeathAnim(dt){
+    // Inspector: stays put as a visible corpse for the whole 10-second
+    // substation resolution sequence. The trap's 'resolving' block
+    // handles fire/smoke above it and finally removes the mesh when
+    // bars raise. Just darken the visor and emissive so the body reads
+    // as "dead," then step out — no flicker/fade here.
+    if(this.isInspector){
+      if(!this._inspectorCorpseApplied){
+        this._inspectorCorpseApplied = true;
+        // Slight slump — scale y by 0.92 and sink the mesh a hair so
+        // it reads as crumpled rather than standing at attention.
+        this.mesh.scale.y = this.mesh.scale.y * 0.92;
+        this.mesh.position.y = this.pos.y - 0.08;
+        // Visor / glowing parts go cold; point lights off.
+        this.mesh.traverse(o => {
+          if(o.isPointLight){ o.intensity = 0; }
+          if(o.material && o.material.isMeshBasicMaterial && o.material.color){
+            if(o.material._deathStartColor === undefined){
+              o.material._deathStartColor = o.material.color.clone();
+            }
+            o.material.color.setRGB(0.04, 0.02, 0.01);
+          }
+          if(o.material && o.material.emissiveIntensity !== undefined){
+            o.material._origEmInt = o.material.emissiveIntensity;
+            o.material.emissiveIntensity = 0;
+          }
+        });
+      }
+      this.mesh.position.copy(this.pos);
+      this.mesh.position.y -= 0.08;
+      return;
+    }
     const el = gs.time - this._dyingStart;
     const dur = this._dyingDuration || 0.75;
     const k = Math.min(1, el / dur);
@@ -6854,15 +6965,31 @@ function fireWeapon(){
   let hitEnemy = null, hitEnemyDist = Infinity, headshot = false;
   for(const e of gs.enemies){
     if(!e.alive) continue;
-    // Body shot
-    const bodyCtr = new THREE.Vector3(e.pos.x, e.pos.y + (e.type==='boss'?0.8:1.0), e.pos.z);
-    const bodyR   = e.type==='boss'?1.9:(e.type==='bot'?0.8:e.type==='turret'?0.9:0.45);
+    // Body shot — the inspector is a 1.45x-scaled bot with a much
+    // taller visible silhouette than a standard bot, so its hit volume
+    // sits higher and is larger. The old bot-sized sphere at y=1.0
+    // barely overlapped its visible chest/torso, which read as "shots
+    // passing through without registering" until the bot stepped
+    // close enough to cover with lower-body shots.
+    const bodyY = e.type==='boss'    ? 0.8 :
+                  e.isInspector      ? 1.7 :
+                  e.type==='bot'     ? 1.0 :
+                  e.type==='turret'  ? 1.0 :
+                  /* drone */          1.0;
+    const bodyR = e.type==='boss'    ? 1.9 :
+                  e.isInspector      ? 1.15 :
+                  e.type==='bot'     ? 0.8 :
+                  e.type==='turret'  ? 0.9 : 0.45;
+    const bodyCtr = new THREE.Vector3(e.pos.x, e.pos.y + bodyY, e.pos.z);
     const d = rayHitsSphere(origin, dir, bodyCtr, bodyR, WEAPON_RANGE);
     if(d!==null && d<hitEnemyDist){ hitEnemy = e; hitEnemyDist = d; headshot = false; }
     // Head shot for humanoid (bot) and drone
     if(e.type==='bot' || e.type==='drone'){
-      const headCtr = new THREE.Vector3(e.pos.x, e.pos.y + (e.type==='bot'?2.25:0.1), e.pos.z);
-      const headR   = e.type==='bot' ? 0.3 : 0.22;
+      const headY = e.isInspector     ? 3.25 :
+                    e.type==='bot'    ? 2.25 :
+                                        0.1;
+      const headR = e.isInspector ? 0.55 : (e.type==='bot' ? 0.3 : 0.22);
+      const headCtr = new THREE.Vector3(e.pos.x, e.pos.y + headY, e.pos.z);
       const dh = rayHitsSphere(origin, dir, headCtr, headR, WEAPON_RANGE);
       if(dh!==null && dh<hitEnemyDist){ hitEnemy = e; hitEnemyDist = dh; headshot = true; }
     }
