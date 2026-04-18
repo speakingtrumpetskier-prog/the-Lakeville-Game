@@ -1017,21 +1017,54 @@ class AudioEngine {
     // Cooling Yard: watery chimes + wet sub swells + pulsing cyan vibe
     this._themes['Cooling Yard'] =
     this._themes['Cooling Tower 03'] = (t, bar) => {
-      // Sub pulse that breathes in/out over the bar
-      const so = this.ctx.createOscillator(); so.type='sine'; so.frequency.value = 48;
+      // During broken wind-down, the THEME ITSELF gets increasingly wrong:
+      // the sub pulse drifts flat, chimes miss their slots, pitches wobble,
+      // and the occasional chime plays a clashing off-key note. brok is
+      // 0 (pristine) → 1 (near-dead).
+      const bw = this._brokenWindDown;
+      const brok = bw ? Math.min(1, bw.step / bw.maxSteps) : 0;
+
+      // Sub pulse — pitch drifts flat + tiny random detune per bar
+      const subFreq = 48 * (1 - brok * 0.18) + (Math.random()-0.5) * 5 * brok;
+      const so = this.ctx.createOscillator(); so.type='sine'; so.frequency.value = subFreq;
       const sg = this.ctx.createGain(); sg.gain.value = 0;
-      sg.gain.linearRampToValueAtTime(0.09, t + bar*0.3);
-      sg.gain.linearRampToValueAtTime(0.0001, t + bar*0.95);
+      // Envelope jitters more as it breaks
+      const attackAt = t + bar*0.3 * (1 + brok*0.5);
+      const releaseAt = t + bar*0.95 * (1 + brok*0.3);
+      sg.gain.linearRampToValueAtTime(0.09 * (1 - brok*0.4), attackAt);
+      sg.gain.linearRampToValueAtTime(0.0001, releaseAt);
+      // Slight wobble ramp — the "wow and flutter" of a dying tape
+      if(brok > 0){
+        so.frequency.linearRampToValueAtTime(subFreq * (1 - 0.08*brok), t + bar);
+      }
       so.connect(sg); sg.connect(this._themeGain);
       so.start(t); so.stop(t + bar);
-      // Watery chimes — random high pings
-      const chimes = 3 + Math.floor(Math.random()*3);
+
+      // Watery chimes — fewer when broken, mistimed, sometimes off-key
       const pingScale = [880, 1046, 1318, 1568, 1760];
+      const wrongScale = [698, 830, 988, 1175, 1397];  // neighboring non-scale tones
+      const baseChimes = 3 + Math.floor(Math.random()*3);
+      const chimes = Math.max(1, Math.floor(baseChimes * (1 - brok*0.6)));
       for(let i=0;i<chimes;i++){
-        const at = t + Math.random()*bar;
-        const f = pingScale[Math.floor(Math.random()*pingScale.length)];
-        makeOsc(at, f, 0.5 + Math.random()*0.5, 0.06, 'sine');
-        makeOsc(at, f*2, 0.3, 0.03, 'sine', null, -6);
+        // More timing jitter as it breaks — notes drift off the grid
+        const jitter = (Math.random() - 0.5) * brok * bar * 0.3;
+        const at = t + Math.random()*bar + jitter;
+        // Wrong-note chance grows; substitute from off-scale set or apply
+        // a pitch warble via big detune.
+        let f, detune = 0;
+        if(Math.random() < brok * 0.55){
+          f = wrongScale[Math.floor(Math.random()*wrongScale.length)];
+          detune = (Math.random()-0.5) * 60 * brok;   // cents
+        } else {
+          f = pingScale[Math.floor(Math.random()*pingScale.length)];
+          detune = (Math.random()-0.5) * 25 * brok;
+        }
+        makeOsc(at, f, 0.5 + Math.random()*0.5, 0.06 * (1 - brok*0.3), 'sine',
+          null, detune);
+        // Overtone sometimes drops out entirely when broken
+        if(Math.random() > brok * 0.6){
+          makeOsc(at, f*2, 0.3, 0.03 * (1 - brok*0.5), 'sine', null, detune - 6);
+        }
       }
     };
 
@@ -1096,10 +1129,10 @@ class AudioEngine {
     };
 
     // Main scheduler — plays the current room's theme once per bar. When
-    // `_brokenWindDown` is set, it plays a few more stunted, broken
-    // renditions with growing pauses and random skips before cracking
-    // to a hard stop. The original melody is altered in place, not
-    // layered with a separate wind-down track.
+    // `_brokenWindDown` is set, it plays a handful of stunted, broken
+    // renditions with growing pauses and per-note detune/wrong-note
+    // perturbations before cracking to a hard stop. The original theme
+    // is what gets broken — not a separate overlay.
     const schedule = ()=>{
       if(!this.ctx) return;
       const room = this._room || '';
@@ -1108,35 +1141,35 @@ class AudioEngine {
       if(bw){
         bw.step++;
         if(bw.step > bw.maxSteps){
-          // Final crack, then long silence.
           this._playCrack();
           this._brokenWindDown = null;
           setTimeout(schedule, bar*2500);
           return;
         }
-        // Growing skip chance: feels like the mechanism catching
-        const skipChance = 0.12 + bw.step * 0.12;
-        const slowK = 1.0 + bw.step * 0.35;       // bars get longer
-        // Fade theme gain progressively toward 0
+        // 10-second total collapse: 4 bars, each progressively longer.
+        // Timings: 2.05, 2.30, 2.55, 2.80 ≈ 9.7s before the crack lands.
+        const gap = 2.05 + (bw.step-1) * 0.25;
+        const skipChance = 0.05 + bw.step * 0.12;
+        // Ramp theme gain down in lock-step with the bar gaps so the
+        // melody fades while it's deteriorating.
         if(this._themeGain){
           const tn = this.now();
+          const target = Math.max(0, 0.85 * (1 - bw.step/bw.maxSteps));
           this._themeGain.gain.cancelScheduledValues(tn);
           this._themeGain.gain.setValueAtTime(this._themeGain.gain.value, tn);
-          const target = Math.max(0, 0.85 * (1 - bw.step/bw.maxSteps));
-          this._themeGain.gain.linearRampToValueAtTime(target, tn + bar * slowK);
+          this._themeGain.gain.linearRampToValueAtTime(target, tn + gap);
         }
-        // Creak sound every broken bar
         this._playCreak(bw.step);
         if(Math.random() < skipChance){
-          // Stop-and-start — a bar of silence
-          setTimeout(schedule, bar * slowK * 1000);
+          // Stop-and-start — a whole bar of silence
+          setTimeout(schedule, gap * 1000);
           return;
         }
         if(theme){
           const t = this.now();
-          try { theme(t, bar * slowK); } catch(e){}
+          try { theme(t, bar); } catch(e){}
         }
-        setTimeout(schedule, bar * slowK * 1000);
+        setTimeout(schedule, gap * 1000);
         return;
       }
       // Normal playback
@@ -1149,10 +1182,11 @@ class AudioEngine {
     schedule();
   }
   // Trigger the broken-wind-down mode on the CURRENT theme. Existing
-  // playback continues but gets stunted and slowed over ~5-7 bars.
+  // playback continues but gets stunted and slowed over 4 bars, total
+  // around 10 seconds, culminating in a snap-crack and silence.
   breakCurrentTheme(){
     if(!this.ready) return;
-    this._brokenWindDown = { step:0, maxSteps:5, start:this.now() };
+    this._brokenWindDown = { step:0, maxSteps:4, start:this.now() };
   }
   // Old-wind-up-toy creak — filtered noise plus a low woody tick.
   _playCreak(step){
@@ -1899,10 +1933,11 @@ function buildNetworkGraph(){
   F(  0,   0,  12, 0, { leadsTo:'Building A — Light Industrial' }); // lobby E half
   F( 12,   0, 55.9, 0);      // Corr E + Building A
 
-  // NORTH-SOUTH SPINE — south piece now points to nothing (CD is cut),
-  // so tagged as 'accent' so it stays on until all rooms clear.
-  F(0, -42.9, 0, -12);                                  // (dead arm — stays reachable for debug)
-  F(0, -12,   0,  4, { leadsTo:'accent' });             // lobby south decorative
+  // NORTH-SOUTH SPINE — both lobby halves point to Cooling Yard so that
+  // clearing Cooling dims a whole third of the lobby (both the north line
+  // leading out AND the south decorative spur balanced with it).
+  F(0, -42.9, 0, -12);                                  // (dead arm — outside lobby, unused)
+  F(0, -12,   0,  4, { leadsTo:'Cooling Yard' });       // lobby south spur (N bucket)
   F(0,  4, 0, 12, { onPath:true, pathIndex:0, leadsTo:'Cooling Yard' });
   F(0, 12, 0, 20, { onPath:true, pathIndex:1 });
   F(0, 20, 0, 34, { onPath:true, pathIndex:2 });
@@ -1910,14 +1945,16 @@ function buildNetworkGraph(){
   F(0, 48, 0, 56, { onPath:true, pathIndex:4 });
   F(0, 56, 0, 66.9, { onPath:true, pathIndex:5 });
 
-  // LOBBY accents (tagged 'accent' — stay lit until ALL rooms are cleared,
-  // then they dim as well for a fully-dark lobby before the celebration).
-  F(-6, -11.9, -6, 11.9, { leadsTo:'accent' });
-  F( 6, -11.9,  6, 11.9, { leadsTo:'accent' });
-  F(-11.9, -6, -6, -11.9, { leadsTo:'accent' });
-  F( 11.9, -6,  6, -11.9, { leadsTo:'accent' });
-  F(-11.9,  6, -6,  11.9, { leadsTo:'accent' });
-  F( 11.9,  6,  6,  11.9, { leadsTo:'accent' });
+  // LOBBY accents — split into W / E buckets so clearing Substation or
+  // Building A each kills its own vertical accent line + both same-side
+  // corner diagonals. Together with the main spine halves this gives
+  // each of the three rooms its own rough third of the lobby lights.
+  F(-6, -11.9, -6, 11.9, { leadsTo:'Substation' });                    // W vertical
+  F( 6, -11.9,  6, 11.9, { leadsTo:'Building A — Light Industrial' }); // E vertical
+  F(-11.9, -6, -6, -11.9, { leadsTo:'Substation' });                   // SW diag
+  F( 11.9, -6,  6, -11.9, { leadsTo:'Building A — Light Industrial' });// SE diag
+  F(-11.9,  6, -6,  11.9, { leadsTo:'Substation' });                   // NW diag
+  F( 11.9,  6,  6,  11.9, { leadsTo:'Building A — Light Industrial' });// NE diag
 
   // BUILDING A internal branches — span wall-to-wall at z=±12.9
   F(28, -12.9, 28, 12.9);
@@ -2160,6 +2197,15 @@ function updateNetwork(dt){
     if(net.bloodMode <= 0 && net.rainbowMode <= 0 && !(gs.showVictoryPath && s.onPath)){
       const lvl = net.litLevels ? (net.litLevels[s.room] || 0) : 0;
       baseOp *= lvl * net.activation;
+      // Cooling-yard wind-down chaos: during the first 2s of wind-down,
+      // every Cooling-tagged segment flickers erratically before the
+      // normal fade takes over.
+      if(net._coolingChaosUntil && gs.time < net._coolingChaosUntil &&
+         s.room === 'Cooling Yard'){
+        const flick = Math.random() < 0.45 ? 1.4 :
+                      Math.random() < 0.3 ? 0.04 : 0.2;
+        baseOp *= flick;
+      }
       // Lobby-segment directional dim: once the room this segment "leads to"
       // has been cleared, its segment fades to 0. Accent segments dim only
       // after ALL destination rooms are cleared.
@@ -2259,26 +2305,9 @@ function addDoorframe(axis, coord, gapCenter, width, color=0x8ee39c, h=4.2){
     header.rotation.y = Math.PI/2;
   }
   scene.add(header);
-  // Glowing threshold strip on floor
-  const strip = new THREE.Mesh(new THREE.PlaneGeometry(width, 0.15), glowMat);
-  strip.rotation.x = -Math.PI/2;
-  if(axis==='x'){
-    strip.position.set(gapCenter, 0.02, coord);
-  } else {
-    strip.position.set(coord, 0.02, gapCenter);
-    strip.rotation.z = Math.PI/2;
-  }
-  scene.add(strip);
-  // Subtle overhead accent
-  const accent = new THREE.Mesh(new THREE.PlaneGeometry(width, 0.08), glowMat.clone());
-  accent.material.opacity = 0.5;
-  if(axis==='x'){
-    accent.position.set(gapCenter, h - 0.32, coord + 0.13);
-  } else {
-    accent.position.set(coord + 0.13, h - 0.32, gapCenter);
-    accent.rotation.y = Math.PI/2;
-  }
-  scene.add(accent);
+  // (Threshold floor strip + overhead accent removed — they were static
+  // colored stripes at every doorway that didn't participate in the
+  // network light system and read as visual debris.)
 }
 
 function addDoorframes(){
@@ -3607,46 +3636,84 @@ function triggerCatwalkPowerDown(){
 function updateCoolingAutomaton(dt){
   const a = gs.coolingAutomaton;
   if(!a) return;
-  // Rotation eases toward target (so wind-down slows smoothly to zero)
-  a.rotationSpeed += (a.targetRotationSpeed - a.rotationSpeed) * Math.min(1, dt * 0.9);
+  // Wind-up-toy rhythm: the TARGET rotation speed breathes around a base.
+  // Sinusoidal variation gives the dance musicality — it speeds up, slows,
+  // and pulses, so it feels alive rather than machine-constant.
+  if(a.state === 'dancing'){
+    const swell = 0.5 + 0.5 * Math.sin(gs.time * 0.55);
+    a.targetRotationSpeed = 0.22 + swell * 0.6;   // 0.22 to 0.82 rad/s
+  }
+  a.rotationSpeed += (a.targetRotationSpeed - a.rotationSpeed) * Math.min(1, dt * 2.0);
   a.turntable.rotation.y += a.rotationSpeed * dt;
-  a.armSwayPhase += dt * a.rotationSpeed * 2.0;
-  // Arm sway — subtle up/down bob synchronized with rotation
-  const raise = Math.max(0, (a.rotationSpeed / 0.45));
+  a.armSwayPhase += dt * (0.6 + a.rotationSpeed * 2.0);
+  const raise = Math.max(0, (a.rotationSpeed / 0.5));
+
   for(let i=0; i<a.arms.length; i++){
     const side = i === 0 ? -1 : 1;
-    const bob = Math.sin(a.armSwayPhase + side*0.6) * 0.12;
-    a.arms[i].rotation.z = bob * raise;
-    a.arms[i].rotation.y = side * Math.sin(a.armSwayPhase) * 0.08 * raise;
+    const bob = Math.sin(a.armSwayPhase + side*0.6) * 0.18;
+    a.arms[i].group.rotation.z = bob * raise;
+    a.arms[i].group.rotation.y = side * Math.sin(a.armSwayPhase) * 0.12 * raise;
   }
-  // Heart / halo gentle pulse while dancing
-  const pulse = 0.85 + Math.sin(gs.time * 1.8) * 0.15;
+
+  // Firework emitters — dispatch sparks from the anchor points while
+  // dancing. Rate scales with rotation speed: spinning harder = more
+  // sparks. Colors oscillate through cyan / pale blue / warm white.
+  if(a.state === 'dancing' && a.emitterLocals){
+    const cnt = Math.max(0, Math.floor(a.rotationSpeed * 5));
+    for(let i=0; i<cnt; i++){
+      const anchor = a.emitterLocals[Math.floor(Math.random()*a.emitterLocals.length)];
+      const local = new THREE.Vector3(anchor.x, anchor.y, anchor.z);
+      a.turntable.updateMatrixWorld();
+      const world = local.applyMatrix4(a.turntable.matrixWorld);
+      const palette = [0x7ee5ff, 0xcbf5ff, 0xa0e4ff, 0xffd090];
+      const color = palette[Math.floor(Math.random()*palette.length)];
+      spawnParticle(
+        world.x + (Math.random()-0.5)*0.06,
+        world.y + (Math.random()-0.5)*0.04,
+        world.z + (Math.random()-0.5)*0.06,
+        (Math.random()-0.5) * (1.5 + a.rotationSpeed),
+        0.4 + Math.random() * (1.2 + a.rotationSpeed * 0.6),
+        (Math.random()-0.5) * (1.5 + a.rotationSpeed),
+        color,
+        0.55 + Math.random()*0.4, 0.06
+      );
+    }
+  }
+
+  // Heart pulse + glow reactivity to rotation
+  const pulse = 0.75 + 0.25 * Math.sin(gs.time * 2.0 + a.rotationSpeed*3);
   if(a.state === 'dancing'){
-    if(a.heart && a.heart.material) a.heart.material.opacity = 0.75 + pulse*0.25;
-    if(a.halo && a.halo.material) a.halo.material.opacity = 0.7 * raise;
-    if(a.inlay && a.inlay.material) a.inlay.material.opacity = 0.75 + pulse*0.2;
-    if(a.automatonLight) a.automatonLight.intensity = 1.4 + pulse*0.4;
+    if(a.heart && a.heart.material) a.heart.material.opacity = pulse;
+    if(a.halo && a.halo.material) a.halo.material.opacity = 0.5 + 0.4*raise;
+    if(a.automatonLight) a.automatonLight.intensity = 1.8 + pulse*1.6 + a.rotationSpeed*0.8;
+    // Gently pulsate wire opacity so the being "breathes"
+    for(const m of a.wireMats){
+      m.opacity = 0.7 + 0.22 * Math.sin(gs.time*1.4 + m.uuid.charCodeAt(0));
+    }
   }
-  // Wind-down progression
+  // Wind-down progression — 10-second collapse, full chaos then stillness.
   if(a.state === 'winding_down'){
     const el = gs.time - a.windStart;
     const k = Math.min(1, el / a.windDuration);
     const dim = 1 - k;
+    // Rotation decays to 0 but with nervous twitches so the figure never
+    // looks mechanically slowed — looks broken.
+    a.targetRotationSpeed = Math.max(0, (1 - k*1.25) * 0.45) + (Math.random()-0.5) * 0.08 * dim;
 
-    // Room CEILING light flickers hard in the first second, then dims to ~10%
+    // Room ceiling light: two full seconds of hard chaos, then a long
+    // trail to near-black.
     const ceil = gs.coolingCeilLight;
     if(ceil && ceil.light){
       if(ceil._origBase === undefined) ceil._origBase = ceil.base;
-      if(el < 1.2){
-        // Chaotic flicker
-        const flick = Math.random() < 0.55 ? 1.0 : (Math.random() < 0.4 ? 0.05 : 0.35);
+      if(el < 2.0){
+        const flick = Math.random() < 0.5 ? 1.5 :
+                      Math.random() < 0.35 ? 0.05 : 0.25;
         ceil.light.intensity = ceil._origBase * flick;
         if(ceil.cone && ceil.cone.material){
-          ceil.cone.material.opacity = 0.35 * flick;
+          ceil.cone.material.opacity = 0.35 * Math.min(1, flick);
         }
       } else {
-        // Settle to a dim 10% and stay there
-        const tail = Math.max(0.1, dim * 0.6);
+        const tail = Math.max(0.04, dim * 0.35);
         ceil.light.intensity = ceil._origBase * tail;
         ceil.base = ceil._origBase * tail;
         if(ceil.cone && ceil.cone.material){
@@ -3654,7 +3721,7 @@ function updateCoolingAutomaton(dt){
         }
       }
     }
-    // Steam plumes fade too (they're blue-tinged mist)
+    // Steam fades
     if(gs.steams){
       for(const steam of gs.steams){
         if(steam.material){
@@ -3663,49 +3730,68 @@ function updateCoolingAutomaton(dt){
         }
       }
     }
+    // Flag the network updater to run a cooling-segment chaos window.
+    if(gs.network){
+      gs.network._coolingChaosUntil = Math.max(
+        gs.network._coolingChaosUntil || 0, a.windStart + 2.0
+      );
+    }
 
-    // Arms fall inward
+    // Arms crumple with dying twitch
     for(let i=0; i<a.arms.length; i++){
       const side = i === 0 ? -1 : 1;
-      a.arms[i].rotation.z = -side * k * 0.55;
+      const jitter = k < 0.6 ? (Math.random()-0.5)*0.25*(1-k) : 0;
+      a.arms[i].group.rotation.z = -side * Math.min(0.7, k * 0.7) + jitter;
     }
-    // Lights fade — multiple point lights contribute to the glow
+
+    // Emitter lights fade
     if(a.automatonLight) a.automatonLight.intensity = 3.4 * dim;
-    if(a.facePl) a.facePl.intensity = 2.0 * dim;
-    if(a.faceWarm) a.faceWarm.intensity = 0.7 * dim;
-    if(a.rimLight) a.rimLight.intensity = 1.2 * dim;
-    // Face pieces fade
-    if(a.mouth && a.mouth.material){ a.mouth.material.opacity = (a.mouth.material.opacity ?? 1) * 0.97; }
-    // Opacities + emissives across all tracked materials
-    if(a.heart && a.heart.material) a.heart.material.opacity = 1.0 * dim;
-    if(a.halo && a.halo.material) a.halo.material.opacity = 0.85 * dim;
-    if(a.haloInner && a.haloInner.material) a.haloInner.material.opacity = 0.65 * dim;
-    if(a.inlay && a.inlay.material) a.inlay.material.opacity = 0.85 * dim;
-    for(const m of a.emissiveMats){
-      if(m && m.emissive){
-        if(m._origEmissive === undefined) m._origEmissive = m.emissiveIntensity;
-        m.emissiveIntensity = m._origEmissive * dim;
-      }
-      if(m && m.opacity !== undefined && m.transparent){
-        if(m._origOp === undefined) m._origOp = m.opacity;
-        m.opacity = m._origOp * dim;
+    if(a.rimLight) a.rimLight.intensity = 1.0 * dim;
+
+    // Eyes: increasingly erratic flicker, ending dark. This is the most
+    // "alive-but-dying" cue on the figure.
+    if(a.eyeMats){
+      const flickerChance = 0.1 + k * 0.85;
+      const on = Math.random() < (1 - flickerChance) ? dim : dim * (Math.random()*0.18);
+      for(const m of a.eyeMats){
+        if(m._origColor === undefined) m._origColor = m.color.clone();
+        m.color.copy(m._origColor).multiplyScalar(on);
       }
     }
-    // Eye discs fade to near-black
-    if(a.eyes){
-      for(const e of a.eyes){
-        if(e.material){
-          if(e.material._origColor === undefined) e.material._origColor = e.material.color.clone();
-          const c = e.material._origColor.clone().multiplyScalar(dim);
-          e.material.color.copy(c);
+
+    // Solid bright nodes (heart, jewel, mouth, hands) fade
+    if(a.solidMats){
+      for(const m of a.solidMats){
+        if(m._origColor === undefined) m._origColor = m.color.clone();
+        m.color.copy(m._origColor).multiplyScalar(dim);
+        if(m.opacity !== undefined && m.transparent){
+          if(m._origOp === undefined) m._origOp = m.opacity;
+          m.opacity = m._origOp * dim;
         }
       }
     }
-    // Jewel opacity too
-    if(a.jewel && a.jewel.material){
-      if(a.jewel.material._origOp === undefined) a.jewel.material._origOp = 0.92;
-      a.jewel.material.opacity = a.jewel.material._origOp * dim;
+    // Wire edges — shake opacity erratically early, then fade
+    if(a.wireMats){
+      for(const m of a.wireMats){
+        if(m._origOp === undefined) m._origOp = m.opacity;
+        const shake = k < 0.6 ? (0.3 + Math.random()*0.7) : 1;
+        m.opacity = m._origOp * shake * dim;
+      }
     }
+    // Dying sparks — sparse, stuttering
+    if(a.emitterLocals && Math.random() < 0.35 * dim){
+      const anchor = a.emitterLocals[Math.floor(Math.random()*a.emitterLocals.length)];
+      const local = new THREE.Vector3(anchor.x, anchor.y, anchor.z);
+      a.turntable.updateMatrixWorld();
+      const world = local.applyMatrix4(a.turntable.matrixWorld);
+      spawnParticle(
+        world.x + (Math.random()-0.5)*0.04,
+        world.y, world.z + (Math.random()-0.5)*0.04,
+        (Math.random()-0.5)*0.8, 0.2 + Math.random()*0.8, (Math.random()-0.5)*0.8,
+        0x7ee5ff, 0.35, 0.04
+      );
+    }
+
     if(k >= 1){
       a.state = 'dead';
       a.rotationSpeed = 0;
@@ -4115,232 +4201,185 @@ function decorateCooling(){
   s.position.set(0, 3.7, 20.8); scene.add(s);
   addEvidencePickup('water', 0, 1.3, 36, 0x7ee5ff);
 
-  // ---- MESMERIZING AUTOMATON ----
-  // Porcelain + brass ballet figure that slowly rotates with extended arms.
-  // On water-pickup it winds down (like a music box running out of tension):
-  // rotation decelerates, lights fade, arms drop. Detailed enough to feel
-  // like a centerpiece; positioned south of the evidence so the player
-  // passes in front of it on approach.
+  // ---- WIREFRAME DANCER ----
+  // A being made of glowing wire edges rather than solid surfaces. It is
+  // suggestive of a person but incomplete — you can see through it. Lights
+  // on its joints emit continuous tiny "fireworks" of particles while it
+  // dances. Rotation breathes (speeds up / slows down) in a wind-up-toy
+  // rhythm so it feels musical.
   const automaton = new THREE.Group();
   automaton.position.set(0, 0, 26);
   scene.add(automaton);
 
-  // Circular brass base plinth with engraved ring
-  const baseMat = new THREE.MeshStandardMaterial({color:0x7a5a2a, metalness:0.95, roughness:0.35,
-                   emissive:0x2a1a0a, emissiveIntensity:0.3});
-  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.05, 0.22, 32), baseMat);
-  base.position.y = 0.11; automaton.add(base);
-  // Base engraving ring (a slightly brighter torus)
-  const engrave = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.025, 8, 32),
-    new THREE.MeshStandardMaterial({color:0xffe0a0, metalness:0.9, roughness:0.2,
-      emissive:0x8a6a2a, emissiveIntensity:0.5}));
-  engrave.rotation.x = Math.PI/2;
-  engrave.position.y = 0.22; automaton.add(engrave);
+  // Build a wireframe LineSegments from a Geometry — standard pattern.
+  const wireMat = new THREE.LineBasicMaterial({
+    color: 0x7ee5ff, transparent: true, opacity: 0.92
+  });
+  // Dim brass base plate (kept solid — otherwise the figure looks unmoored)
+  const baseMat = new THREE.MeshStandardMaterial({color:0x3a2a10, metalness:0.9, roughness:0.4,
+                   emissive:0x2a1a0a, emissiveIntensity:0.2});
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.05, 0.12, 24), baseMat);
+  base.position.y = 0.06; automaton.add(base);
+  // Wireframe halo ring on the base
+  const baseRingEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(0.82, 0.018, 6, 32));
+  const baseRing = new THREE.LineSegments(baseRingEdges, wireMat.clone());
+  baseRing.material.color.setHex(0xffe0a0); baseRing.material.opacity = 0.9;
+  baseRing.rotation.x = Math.PI/2; baseRing.position.y = 0.13;
+  automaton.add(baseRing);
 
-  // Rotating TURNTABLE group — everything above the base rotates together
+  // Turntable — spins as a unit
   const turntable = new THREE.Group();
-  turntable.position.y = 0.22;
+  turntable.position.y = 0.12;
   automaton.add(turntable);
 
-  // Porcelain body — tall cylinder with gold trim bands
-  const porcelainMat = new THREE.MeshStandardMaterial({
-    color:0xf0ece2, metalness:0.1, roughness:0.25,
-    emissive:0x8aa4b8, emissiveIntensity:0.1
-  });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.45, 1.6, 24), porcelainMat);
-  body.position.y = 0.8; turntable.add(body);
-  // Gold trim bands (three horizontal rings around the body)
-  const trimMat = new THREE.MeshStandardMaterial({color:0xd0a644, metalness:0.95, roughness:0.2,
-                   emissive:0x8a6a24, emissiveIntensity:0.3});
-  for(const by of [0.3, 0.95, 1.55]){
-    const r = 0.45 - (by - 0.2) * 0.08;
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 0.035, 8, 22), trimMat);
-    ring.rotation.x = Math.PI/2;
-    ring.position.y = by; turntable.add(ring);
+  // Body wireframe — tall cage cylinder built from EdgesGeometry
+  const bodyEdges = new THREE.EdgesGeometry(new THREE.CylinderGeometry(0.32, 0.45, 1.6, 14, 4));
+  const body = new THREE.LineSegments(bodyEdges, wireMat.clone());
+  body.position.y = 0.9; turntable.add(body);
+  // Three horizontal rib rings at different heights
+  const ribMats = [];
+  for(const [by, r] of [[0.3, 0.45],[0.95, 0.38],[1.55, 0.3]]){
+    const ribEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(r, 0.015, 6, 22));
+    const rib = new THREE.LineSegments(ribEdges, wireMat.clone());
+    rib.material.color.setHex(0xcbf5ff); rib.material.opacity = 0.85;
+    rib.rotation.x = Math.PI/2; rib.position.y = by; turntable.add(rib);
+    ribMats.push(rib.material);
   }
-  // Blue stained-glass inlay — vertical window on the front of the body
-  const inlayMat = new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.85,
-                    side:THREE.DoubleSide});
-  const inlay = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.9), inlayMat);
-  inlay.position.set(0, 0.8, 0.46); turntable.add(inlay);
-  // A brighter core sphere behind the inlay (visible through the glass)
+  // Glowing solid heart core inside the cage (the one non-wireframe interior detail)
   const heartMat = new THREE.MeshBasicMaterial({color:0xcbf5ff});
-  const heart = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), heartMat);
-  heart.position.set(0, 0.8, 0.3); turntable.add(heart);
-
-  // Shoulders / shoulder pads — small orbs
-  const shoulderMat = porcelainMat;
-  for(const side of [-1, 1]){
-    const sho = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 10), shoulderMat);
-    sho.position.set(side * 0.3, 1.55, 0); turntable.add(sho);
+  const heart = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 10), heartMat);
+  heart.position.y = 0.95; turntable.add(heart);
+  // Outward-radiating wire spokes from the heart (a star inside the cage)
+  for(let i=0;i<6;i++){
+    const ang = (i/6) * Math.PI * 2;
+    const spokeGeo = new THREE.BufferGeometry();
+    spokeGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      0, 0.95, 0,
+      Math.cos(ang)*0.35, 0.95, Math.sin(ang)*0.35
+    ]), 3));
+    const spoke = new THREE.LineSegments(spokeGeo, wireMat.clone());
+    spoke.material.color.setHex(0xcbf5ff);
+    turntable.add(spoke);
   }
-  // Arms — extended sideways. Each arm is a parent group so we can raise/
-  // lower them during wind-down.
+
+  // Arms — wireframe elbow bones
   const arms = [];
   for(const side of [-1, 1]){
     const armGroup = new THREE.Group();
     armGroup.position.set(side * 0.32, 1.55, 0);
     turntable.add(armGroup);
-    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.55, 10), porcelainMat);
-    upper.position.set(side * 0.28, 0, 0);
-    upper.rotation.z = side * Math.PI/2;
+    // Upper arm bone — a single line with endcap dots
+    const upperGeo = new THREE.BufferGeometry();
+    upperGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      0, 0, 0,
+      side * 0.55, 0, 0
+    ]), 3));
+    const upper = new THREE.LineSegments(upperGeo, wireMat.clone());
     armGroup.add(upper);
-    // Elbow orb
-    const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), porcelainMat);
-    elbow.position.set(side * 0.56, 0, 0);
+    // Elbow cage — small icosahedron wireframe
+    const elbowEdges = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(0.09, 0));
+    const elbow = new THREE.LineSegments(elbowEdges, wireMat.clone());
+    elbow.material.color.setHex(0xcbf5ff);
+    elbow.position.set(side * 0.55, 0, 0);
     armGroup.add(elbow);
-    // Forearm reaches outward and slightly upward (balletic)
-    const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 10), porcelainMat);
-    fore.position.set(side * 0.78, 0.08, 0);
-    fore.rotation.z = side * Math.PI/2 - side * 0.3;
+    // Forearm — raised slightly upward
+    const foreGeo = new THREE.BufferGeometry();
+    foreGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+      side * 0.55, 0, 0,
+      side * 0.98, 0.18, 0
+    ]), 3));
+    const fore = new THREE.LineSegments(foreGeo, wireMat.clone());
     armGroup.add(fore);
-    // Hand — a small stained-glass petal
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8),
-      new THREE.MeshStandardMaterial({color:0x7ee5ff, transparent:true, opacity:0.8,
-        emissive:0x7ee5ff, emissiveIntensity:0.8}));
+    // Hand — small bright solid node (particle emitter anchor)
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8),
+      new THREE.MeshBasicMaterial({color:0x7ee5ff}));
     hand.position.set(side * 0.98, 0.18, 0);
     armGroup.add(hand);
-    arms.push(armGroup);
+    arms.push({ group:armGroup, hand });
   }
 
-  // ---- NECK + HEAD ASSEMBLY ----
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.15, 12), porcelainMat);
-  neck.position.y = 1.7; turntable.add(neck);
-
-  // Head SKULL — slightly larger porcelain sphere, the canvas for the face
-  const headCore = new THREE.Mesh(new THREE.SphereGeometry(0.28, 22, 16),
-    new THREE.MeshStandardMaterial({color:0xf8f2e4, metalness:0.1, roughness:0.2,
-      emissive:0x4a8ac0, emissiveIntensity:0.55}));
+  // Head — wireframe sphere cage
+  const headEdges = new THREE.EdgesGeometry(new THREE.SphereGeometry(0.28, 10, 8));
+  const headCore = new THREE.LineSegments(headEdges, wireMat.clone());
   headCore.position.y = 1.98; turntable.add(headCore);
-
-  // Ornate BRASS FACEPLATE — fits over the front of the skull, etched
-  // in gold. A horizontal curved plate wrapping the front half.
-  const facePlateMat = new THREE.MeshStandardMaterial({
-    color:0xd8ae58, metalness:0.95, roughness:0.22,
-    emissive:0xaa7830, emissiveIntensity:0.5
-  });
-  const facePlate = new THREE.Mesh(
-    new THREE.SphereGeometry(0.295, 22, 14, -Math.PI*0.45, Math.PI*0.9,
-      Math.PI*0.22, Math.PI*0.56),
-    facePlateMat);
-  facePlate.position.y = 1.98; turntable.add(facePlate);
-
-  // Face lamp — internal glow that pushes through the eye sockets. A
-  // bright point light placed INSIDE the head.
-  const facePl = new THREE.PointLight(0xa0e4ff, 2.0, 3);
-  facePl.position.set(0, 1.98, 0);
-  turntable.add(facePl);
-
-  // Robotic EYES — two recessed glowing cyan discs with brass orbital rings
-  const eyeGlowMat = new THREE.MeshBasicMaterial({color:0xcbf5ff});
-  const eyeRingMat = new THREE.MeshStandardMaterial({color:0xe0b868, metalness:0.95,
-                      roughness:0.2, emissive:0x8a6a24, emissiveIntensity:0.45});
+  // Inside the head: two bright eye orbs (solid dots) so the face reads
+  const eyeMats = [];
   const eyes = [];
   for(const side of [-1, 1]){
-    const eye = new THREE.Mesh(new THREE.CircleGeometry(0.045, 18), eyeGlowMat);
-    eye.position.set(side * 0.08, 2.02, 0.27);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.042, 10, 8),
+      new THREE.MeshBasicMaterial({color:0xcbf5ff}));
+    eye.position.set(side * 0.08, 2.02, 0.23);
     turntable.add(eye);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.012, 6, 16), eyeRingMat);
-    ring.position.set(side * 0.08, 2.02, 0.28);
-    turntable.add(ring);
-    // Eye socket dark ring so the eye reads as recessed
-    const socket = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.008, 6, 18),
-      new THREE.MeshStandardMaterial({color:0x1a2028, metalness:0.6, roughness:0.5}));
-    socket.position.set(side * 0.08, 2.02, 0.282);
-    turntable.add(socket);
     eyes.push(eye);
+    eyeMats.push(eye.material);
   }
-  // Cheek filigree — two small diamond-shaped brass accents
-  for(const side of [-1, 1]){
-    const diamond = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.02), facePlateMat);
-    diamond.position.set(side * 0.17, 1.90, 0.265);
-    diamond.rotation.z = Math.PI/4;
-    turntable.add(diamond);
-  }
-  // MOUTH — a glowing horizontal slit with a brass hinge, warm orange inside
-  const mouthMat = new THREE.MeshBasicMaterial({color:0xffc878});
-  const mouth = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.022), mouthMat);
-  mouth.position.set(0, 1.85, 0.283);
-  turntable.add(mouth);
-  // Small decorative brass mouthpiece below
-  const chin = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.03, 0.04), facePlateMat);
-  chin.position.set(0, 1.80, 0.28);
-  turntable.add(chin);
-
-  // Forehead jewel — a raised cyan gem
-  const jewelMat = new THREE.MeshStandardMaterial({color:0x7ee5ff, metalness:0.4, roughness:0.1,
-                    emissive:0x7ee5ff, emissiveIntensity:1.3,
-                    transparent:true, opacity:0.92});
+  // Forehead jewel — bright octahedron
+  const jewelMat = new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.95});
   const jewel = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), jewelMat);
-  jewel.position.set(0, 2.11, 0.26);
+  jewel.position.set(0, 2.11, 0.22);
   turntable.add(jewel);
+  // Mouth — small bright line
+  const mouthMat = new THREE.MeshBasicMaterial({color:0xffd090});
+  const mouth = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.016), mouthMat);
+  mouth.position.set(0, 1.85, 0.24);
+  turntable.add(mouth);
 
-  // Back-of-head filigree — decorative curves on the skull back
-  for(let i=0; i<4; i++){
-    const ang = -Math.PI*0.1 + i * 0.22;
-    const strand = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.012, 6, 10,
-      Math.PI*0.35),
-      facePlateMat);
-    strand.position.set(0, 1.98, 0);
-    strand.rotation.y = Math.PI + (i - 1.5) * 0.2;
-    strand.rotation.z = 0.1 + ang*0.4;
-    turntable.add(strand);
-  }
-
-  // Crown HALO + brighter pulsing ring
-  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.028, 8, 30),
-    new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.85}));
+  // Crown halo — wireframe torus
+  const haloEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(0.32, 0.025, 6, 30));
+  const halo = new THREE.LineSegments(haloEdges, wireMat.clone());
+  halo.material.color.setHex(0x7ee5ff);
   halo.rotation.x = Math.PI/2; halo.position.y = 2.3;
   turntable.add(halo);
-  const haloInner = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.014, 6, 24),
-    new THREE.MeshBasicMaterial({color:0xcbf5ff, transparent:true, opacity:0.65}));
-  haloInner.rotation.x = Math.PI/2; haloInner.position.y = 2.31;
-  turntable.add(haloInner);
-  // Crown shards — eight vertical stained-glass blades
-  for(let i=0; i<8; i++){
-    const ang = (i / 8) * Math.PI * 2;
-    const tall = i%2===0 ? 0.22 : 0.14;
-    const shard = new THREE.Mesh(new THREE.BoxGeometry(0.045, tall, 0.022),
-      new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.8}));
-    shard.position.set(Math.cos(ang) * 0.32, 2.36 + tall*0.25, Math.sin(ang) * 0.32);
-    shard.rotation.y = -ang;
-    turntable.add(shard);
-  }
 
-  // Inner cyan point light (much brighter than before so it reads as a
-  // genuine centerpiece when dancing — so the dim-down is starker)
+  // Lights
   const automatonLight = new THREE.PointLight(0x9de8ff, 3.4, 11);
   automatonLight.position.set(0, 1.3, 0);
   automaton.add(automatonLight);
-  // Warm accent light near the mouth so the face registers even at distance
-  const faceWarm = new THREE.PointLight(0xffd090, 0.7, 3.5);
-  faceWarm.position.set(0, 1.85, 0.4);
-  turntable.add(faceWarm);
-  // Upward rim light from the base (washes the figure from below)
-  const rimLight = new THREE.PointLight(0x6ab4e0, 1.2, 5);
-  rimLight.position.set(0, 0.4, 0);
+  const rimLight = new THREE.PointLight(0x6ab4e0, 1.0, 5);
+  rimLight.position.set(0, 0.3, 0);
   automaton.add(rimLight);
 
-  // Collision cylinder so the player can't walk through the automaton
+  // Collision cylinder
   gs.walls.push({minX:-0.95, maxX:0.95, minZ:25.05, maxZ:26.95});
 
-  // Register with state so updateAutomaton can animate it
+  // Collect every wire material we spawned so wind-down can dim them all
+  const wireMats = [];
+  turntable.traverse(o => {
+    if(o.material && (o.isLine || o.isLineSegments)){
+      wireMats.push(o.material);
+    }
+  });
+  // Also include baseRing + halo + body ribs + spokes (already in traverse)
+
+  // Particle emit anchor points: hands, jewel, heart, elbows, halo top.
+  // updateCoolingAutomaton dispatches sparks from these at a rate tied to
+  // the current rotation speed — the faster it spins, the more the body
+  // seems to be blowing fireworks. World positions are computed at
+  // emit time so they follow the turntable.
   gs.coolingAutomaton = {
     group: automaton,
-    turntable, arms, heart, halo, haloInner, inlay,
-    automatonLight, facePl, faceWarm, rimLight,
-    headCore, eyes, mouth, jewel,
-    state: 'dancing',       // 'dancing' | 'winding_down' | 'dead'
+    turntable, arms, heart, halo, jewel, headCore, eyes, mouth,
+    automatonLight, rimLight,
+    state: 'dancing',
     rotationSpeed: 0.45,
     targetRotationSpeed: 0.45,
     armSwayPhase: 0,
     windStart: 0,
-    windDuration: 5.5,
-    emissiveMats: [
-      inlayMat, heartMat, trimMat, engrave.material,
-      baseMat, porcelainMat, headCore.material,
-      facePlateMat, eyeGlowMat, jewelMat, mouthMat,
-      eyeRingMat
+    windDuration: 10.0,
+    wireMats,
+    eyeMats,
+    solidMats: [heartMat, jewelMat, mouthMat,
+      arms[0].hand.material, arms[1].hand.material],
+    emitterLocals: [
+      { x: 0, y: 0.95, z: 0 },                 // heart
+      { x: 0, y: 2.11, z: 0.22 },              // jewel
+      { x: 0, y: 1.85, z: 0.24 },              // mouth
+      { x: -0.98, y: 1.73, z: 0 },             // left hand (arm local x * 1)
+      { x:  0.98, y: 1.73, z: 0 },             // right hand
+      { x: -0.55, y: 1.55, z: 0 },             // left elbow
+      { x:  0.55, y: 1.55, z: 0 },             // right elbow
+      { x: 0, y: 2.3, z: 0.32 },               // halo front
+      { x: 0, y: 2.3, z: -0.32 },              // halo back
     ]
   };
 }
