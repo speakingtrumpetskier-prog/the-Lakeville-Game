@@ -5675,8 +5675,15 @@ class Enemy {
         this.state='idle'; this.lastKnownPlayer = null;
       }
     } else if(this.state==='idle' && this.type==='bot'){
-      const t = gs.time*0.3 + this.yaw;
-      moveX = Math.cos(t)*0.3; moveZ = Math.sin(t)*0.3;
+      // Slow circular wander. Default amp/omega give a ~3m radius loop.
+      // Bots carrying `wanderAmp` / `wanderOmega` customize the path size
+      // — useful when we want a specific bot to pass in and out of the
+      // player's sightline (e.g., weaving around obstacles in the open
+      // yard rooms).
+      const amp   = this.wanderAmp   ?? 0.3;
+      const omega = this.wanderOmega ?? 0.3;
+      const t = gs.time*omega + this.yaw;
+      moveX = Math.cos(t)*amp; moveZ = Math.sin(t)*amp;
     }
     this.vel.x = moveX * this.speed;
     this.vel.z = moveZ * this.speed;
@@ -5801,6 +5808,13 @@ class Enemy {
     const d2 = dx*dx + dz*dz;
     const sight = this.type==='turret' ? 26 : ENEMY_SIGHT;
     if(d2 > sight*sight) return false;
+    // Vertical-gap gate: ground-level enemies (y≤1) should NOT see the
+    // player when the player is on a raised platform like the Server
+    // Hall catwalk (y≥2). Walls are XZ-only AABBs, so without this check
+    // a turret at the floor will shoot through the catwalk deck and read
+    // as an invisible attacker. Drones / boss hover above 1.0 so they're
+    // exempt — they can still chase the player up into the walkway.
+    if(this.pos.y < 1.0 && p.pos.y > 2.0) return false;
     if(lineHitsWalls(this.pos.x, this.pos.z, p.pos.x, p.pos.z, gs.walls)) return false;
     if(this.type==='boss' || this.type==='turret') return true;
     const d = Math.sqrt(d2);
@@ -5812,7 +5826,11 @@ class Enemy {
     if(this.type==='bot'){
       const p = gs.player;
       const d = Math.hypot(p.pos.x - this.pos.x, p.pos.z - this.pos.z);
-      if(d < this.attackRange){
+      // Bot melee must also gate on vertical gap — otherwise a ground
+      // bot "punches up" at a player on the catwalk from below the
+      // deck, invisibly.
+      const dy = Math.abs(p.pos.y - this.pos.y);
+      if(d < this.attackRange && dy < 2.0){
         damagePlayer(this.attackDamage);
         spawnMuzzleFlash(this.pos.x, 1.6, this.pos.z, 0xff3040, 0.15);
       }
@@ -7514,15 +7532,21 @@ function spawnInitialEnemies(){
   // Substation is EMPTY at spawn. The diesel pickup triggers every
   // encounter in that room — keeps the room feeling safe on walk-in,
   // then the trap brings the horror.
-  // Cooling Yard — red-eyed bots positioned near the front of the room so
-  // they're clearly visible from the player's spawn through the narrow
-  // Corr N doorway. One bot dead-center at z=28 (just past the corridor
-  // mouth) is the "red eyes walking around in the background" tableau on
-  // load-in. A second bot further in gives the sense of patrol.
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(0, 0, 28)));
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(3, 0, 36)));
-  gs.enemies.push(new Enemy('drone', new THREE.Vector3(-4, 2, 42)));
-  spawnTurret(7, 44);     // cooling (off-center so bots have room to wander)
+  // Cooling Yard — red-eyed bot wandering at the front of the room.
+  // Bot is >28 units from spawn so its canSee won't trigger at load-in
+  // (stays idle). Its wander path is enlarged (wanderOmega=0.12 gives a
+  // ~period of 52s, radius ~8.5m) so it naturally drifts in and out of
+  // the narrow corridor sightline — sometimes visible as a red-eyed
+  // silhouette in the background, sometimes disappearing behind a
+  // cooling tower on the west side. The second bot is further in,
+  // quieter patrol. Drone at the back for when the player enters.
+  const coolBot = new Enemy('bot', new THREE.Vector3(0, 0, 32));
+  coolBot.wanderOmega = 0.12;   // slower angular rate → much larger path
+  coolBot.wanderAmp   = 0.3;    // keep walking speed modest
+  gs.enemies.push(coolBot);
+  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(4, 0, 40)));
+  gs.enemies.push(new Enemy('drone', new THREE.Vector3(-4, 2, 44)));
+  spawnTurret(8, 44);     // cooling (off-center so bots have room to wander)
   // (Community Development enemies removed — room is cut from this build.)
 }
 
