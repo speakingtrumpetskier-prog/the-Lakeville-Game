@@ -2206,6 +2206,18 @@ function updateNetwork(dt){
                       Math.random() < 0.3 ? 0.04 : 0.2;
         baseOp *= flick;
       }
+      // Cooling-yard wind-down dim-ramp: over the full 10s wind-down the
+      // blue floor lines in that room drop to 15% of their normal
+      // brightness and stay there. Matches the dying automaton: the
+      // machinery's gone, so the floor lines are on emergency power.
+      if(net._coolingDimStart !== undefined && s.room === 'Cooling Yard'){
+        const el = gs.time - net._coolingDimStart;
+        const dur = net._coolingDimDuration || 10.0;
+        const dimK = Math.min(1, Math.max(0, el / dur));
+        // 1.0 at start → 0.15 at end (and stays there permanently)
+        const mult = 1 - dimK * 0.85;
+        baseOp *= mult;
+      }
       // Lobby-segment directional dim: once the room this segment "leads to"
       // has been cleared, its segment fades to 0. Accent segments dim only
       // after ALL destination rooms are cleared.
@@ -3193,9 +3205,11 @@ function triggerSubstationTrap(){
   showToast('CONTAINMENT ENGAGED', 'DNR Override Unit inbound.');
   setObjective('Survive the ambush. Disable the override unit.');
 
-  // Spawn initial pair of enemies from the elevators, 0.9s apart
+  // Spawn a single ground-floor bot from the first elevator. The catwalk
+  // drone was too sneaky — players couldn't parse where the hits were
+  // coming from — so it's dropped entirely. The DNR Override Unit still
+  // arrives later from the third elevator.
   setTimeout(()=> substationSpawnEnemy(trap.elevators[0], 'bot'), 900);
-  setTimeout(()=> substationSpawnEnemy(trap.elevators[1], 'drone'), 1800);
 }
 
 function substationSpawnEnemy(elev, kind){
@@ -3735,10 +3749,16 @@ function updateCoolingAutomaton(dt){
       }
     }
     // Flag the network updater to run a cooling-segment chaos window.
+    // Also plant a dim-ramp so cooling-yard floor lines fall to 15% of
+    // their normal brightness by the time the automaton is dead.
     if(gs.network){
       gs.network._coolingChaosUntil = Math.max(
         gs.network._coolingChaosUntil || 0, a.windStart + 2.0
       );
+      if(gs.network._coolingDimStart === undefined){
+        gs.network._coolingDimStart = a.windStart;
+        gs.network._coolingDimDuration = a.windDuration;
+      }
     }
 
     // Arms crumple with dying twitch
@@ -3796,6 +3816,29 @@ function updateCoolingAutomaton(dt){
       for(const m of a.silMats){
         if(m._origOp === undefined) m._origOp = m.opacity;
         m.opacity = m._origOp * (0.7 + 0.3 * dim);
+      }
+    }
+    // Hands: flicker ON (original cyan) / OFF (dark grey) like the eyes.
+    // Off-chance grows as k increases so they stutter out to grey. This
+    // is distinct from the other solid orbs (heart/jewel/mouth) which
+    // fade as a smooth glow — the hands stay "lit until they die," then
+    // read as dead grey metal rather than faint blue orbs.
+    if(a.handMats){
+      const flickerChance = 0.15 + k * 0.8;
+      const offNow = Math.random() < flickerChance;
+      const greyHex = new THREE.Color(0x2a2e32);
+      for(const m of a.handMats){
+        if(m._origColor === undefined) m._origColor = m.color.clone();
+        if(offNow){
+          m.color.copy(greyHex);
+        } else {
+          // "On" state fades with the overall dim
+          m.color.copy(m._origColor).lerp(greyHex, 1 - dim);
+        }
+        if(m.opacity !== undefined && m.transparent){
+          if(m._origOp === undefined) m._origOp = m.opacity;
+          m.opacity = m._origOp;
+        }
       }
     }
     // Dying sparks — sparse, stuttering
@@ -4441,8 +4484,11 @@ function decorateCooling(){
     wireMats,
     silMats,
     eyeMats,
-    solidMats: [heartMat, jewelMat, mouthMat,
-      arms[0].hand.material, arms[1].hand.material],
+    // Hands handled separately from the rest of the solid glows — they
+    // should flicker AND drift toward dark grey during wind-down rather
+    // than linger as dim blue nodes.
+    handMats: [arms[0].hand.material, arms[1].hand.material],
+    solidMats: [heartMat, jewelMat, mouthMat],
     emitterLocals: [
       { x: 0, y: 0.95, z: 0 },                 // heart
       { x: 0, y: 2.11, z: 0.22 },              // jewel
@@ -6760,16 +6806,16 @@ function interactUI(text){
   else el.style.display='none';
 }
 function showToast(title, body){
-  $('toastTitle').textContent = title;
-  $('toastBody').textContent = body;
-  $('toast').style.display='block';
-  gs.toastTimer = 3.0;
+  // Disabled — the green pop-up box narrating events was noisy. All
+  // "what to do" cues now live on the objective line (setObjective).
+  // Existing call sites throughout the game are preserved but no-op
+  // here so any future re-enable is a one-line change.
 }
 function updateToast(dt){
-  if(gs.toastTimer>0){
-    gs.toastTimer -= dt;
-    if(gs.toastTimer<=0) $('toast').style.display='none';
-  }
+  // No-op now that showToast is disabled. Kept so the main update loop
+  // caller doesn't need to be touched.
+  const el = $('toast');
+  if(el && el.style.display !== 'none') el.style.display = 'none';
 }
 function damagePlayer(amount){
   const p = gs.player;
@@ -7464,8 +7510,9 @@ function drawMinimap(){
    SPAWNS
    ===================================================== */
 function spawnInitialEnemies(){
-  gs.enemies.push(new Enemy('drone', new THREE.Vector3(34, 2, 6)));
-  gs.enemies.push(new Enemy('drone', new THREE.Vector3(48, 2, -5)));
+  // Server Hall A (the catwalk room): drones removed — they flew around
+  // at mid-height and were too sneaky to spot from the catwalk. The bot +
+  // turrets carry the ground-floor combat.
   gs.enemies.push(new Enemy('bot',   new THREE.Vector3(38, 0, 0)));
   spawnTurret(30, 10);    // server hall
   spawnTurret(52, -10);   // server hall
