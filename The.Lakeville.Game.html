@@ -1696,8 +1696,11 @@ function buildLevel(){
   gs.doors.push({kind:'filing', mesh:lockDoor, light:null, open:false, collider});
   gs.walls.push(collider);
 
-  const sign = makeSignMesh('FILING  -  AUTH REQUIRED', 0xffcc55);
-  sign.position.set(0, 3.8, 47.8);
+  // Two-line sign so the text doesn't overrun the 6-unit-wide door.
+  // Plane width is 5.2 (0.4m margin on each side) so the sign is
+  // guaranteed to sit on the door face and not bleed into the wall.
+  const sign = makeTwoLineSignMesh('FILING', 'AUTH REQUIRED', 0xffc040);
+  sign.position.set(0, 3.55, 47.78);
   sign.rotation.y = Math.PI;
   scene.add(sign);
 }
@@ -2678,6 +2681,52 @@ function makeTileCeilTex(){
   tex.repeat.set(3, 3);
   tex.anisotropy = 4;
   return tex;
+}
+
+function makeTwoLineSignMesh(line1, line2, color=0x8ee39c, opts={}){
+  // Two-line variant of makeSignMesh. Used where the intended text is too
+  // long to sit on a door / jamb without bleeding into adjacent wall —
+  // splits the string across two lines so both fit comfortably, with a
+  // smaller plane width by default to guarantee the sign stays on its
+  // host surface. Uses a soft (not bloom-heavy) glow so the text reads
+  // as backlit signage, not a fluttering neon strip.
+  const W = 1024, H = 256;
+  const planeW = opts.planeW !== undefined ? opts.planeW : 5.2;
+  const planeH = opts.planeH !== undefined ? opts.planeH : 1.55;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const hex = '#'+color.toString(16).padStart(6,'0');
+  g.fillStyle = '#081210'; g.fillRect(0,0,W,H);
+  g.strokeStyle = hex; g.lineWidth = 6;
+  g.strokeRect(12, 12, W-24, H-24);
+  g.fillStyle = hex;
+  for(const [x,y] of [[28,28],[W-28,28],[28,H-28],[W-28,H-28]]){
+    g.beginPath(); g.arc(x,y,5,0,Math.PI*2); g.fill();
+  }
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  // Auto-fit so BOTH lines fit inside the canvas with margin
+  let fontSize = 92;
+  const maxWidth = W - 90;
+  do {
+    g.font = 'bold '+fontSize+'px Consolas, "Segoe UI", monospace';
+    const w1 = g.measureText(line1).width;
+    const w2 = g.measureText(line2).width;
+    if(Math.max(w1, w2) <= maxWidth) break;
+    fontSize -= 4;
+  } while(fontSize > 28);
+  g.fillStyle = hex;
+  g.shadowColor = hex;
+  g.shadowBlur  = 6;    // gentler than the single-line sign's 12
+  g.fillText(line1, W/2, H/2 - fontSize*0.58);
+  g.fillText(line2, W/2, H/2 + fontSize*0.58);
+  g.shadowBlur = 0;
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 8;
+  const mat = new THREE.MeshBasicMaterial({map:tex, transparent:true});
+  const geo = new THREE.PlaneGeometry(planeW, planeH);
+  return new THREE.Mesh(geo, mat);
 }
 
 function makeSignMesh(text, color=0x8ee39c){
