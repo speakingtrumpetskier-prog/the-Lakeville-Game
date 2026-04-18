@@ -1567,7 +1567,7 @@ function buildLevel(){
   }
 
   // Rooms
-  addRoom('Lobby', 0,0, 24,24);
+  addRoom('Lobby', 0,0, 24,24, 6.6);   // tall lobby so the chandelier has room to hang
   addRoom('Server Hall A', 40,0, 32,26, 6.0);
   addRoom('Substation', -40,0, 28,22);
   addRoom('Cooling Tower 03', 0,34, 28,28);
@@ -1581,10 +1581,28 @@ function buildLevel(){
   // Lobby walls with gaps toward corridors. South wall is SEALED — the
   // Community Development corridor is cut in this build, so the lobby
   // south wall is now solid (OLAM signage hangs on it from the inside).
-  addWallWithGap('x', 12, -12, 12, 0, 6);    // north wall: gap → Corr N
-  addWall(-12, -12, 12, -12);                // south wall: SEALED
-  addWallWithGap('z', 12, -12, 12, 0, 6);    // east wall:  gap → Corr E
-  addWallWithGap('z', -12, -12, 12, 0, 6);   // west wall:  gap → Corr W
+  // Walls are 6.6m tall to match the raised lobby ceiling so the
+  // skybox isn't visible above the wall tops.
+  addWallWithGap('x', 12, -12, 12, 0, 6, 6.6);    // north wall: gap → Corr N
+  addWall(-12, -12, 12, -12, 6.6);                // south wall: SEALED
+  addWallWithGap('z', 12, -12, 12, 0, 6, 6.6);    // east wall:  gap → Corr E
+  addWallWithGap('z', -12, -12, 12, 0, 6, 6.6);   // west wall:  gap → Corr W
+  // Lintels above each lobby corridor doorway — seal the vertical gap
+  // between the (shorter) corridor ceiling and the raised lobby
+  // ceiling. Without these you'd see a strip of void above each
+  // corridor opening when looking through the doorway from the lobby.
+  const lobbyLintelMat = new THREE.MeshStandardMaterial({
+    color:0x1a2520, roughness:0.7, metalness:0.25
+  });
+  // Corr N (corridor ceiling 4.4) — lintel spans 4.4..6.6 = 2.2m tall
+  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(6, 2.2, 0.3), lobbyLintelMat);
+  lintelN.position.set(0, 5.5, 12); scene.add(lintelN);
+  // Corr W (corridor ceiling 4.4) — same 2.2m tall
+  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.2, 6), lobbyLintelMat);
+  lintelW.position.set(-12, 5.5, 0); scene.add(lintelW);
+  // Corr E (corridor ceiling 6.0) — smaller 0.6m tall
+  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 6), lobbyLintelMat);
+  lintelE.position.set(12, 6.3, 0); scene.add(lintelE);
 
   // Server hall (taller — accommodates the catwalk and head clearance)
   addWallWithGap('z', 24, -13, 13, 0, 6, 6.0);
@@ -2908,9 +2926,12 @@ function decorateLobby(){
   gs.dualSigns = { cover:[logo, sub], truth:[truthLogo, truthSub] };
   addPlant(-8, 0, -8);
   addPlant(8, 0, -8);
-  addCeilLight(0, 4.2, 0, 0xbfe6c6, 1.2, 22);
-  addCeilLight(-8, 4.2, 6, 0x8ee39c, 0.6, 10);
-  addCeilLight(8, 4.2, 6, 0x8ee39c, 0.6, 10);
+  // Lobby ceiling is raised to 6.6 for the chandelier — push the
+  // ambient ceiling lights up to match so their cones still start
+  // at the ceiling mesh, and widen their range a bit.
+  addCeilLight(0, 6.4, 0, 0xbfe6c6, 1.2, 28);
+  addCeilLight(-8, 6.4, 6, 0x8ee39c, 0.6, 14);
+  addCeilLight(8, 6.4, 6, 0x8ee39c, 0.6, 14);
   decorateLobbyCenterpiece();
 }
 
@@ -2923,8 +2944,12 @@ function decorateLobby(){
 // suggests something inside is breathing.
 // ============================================================
 function decorateLobbyCenterpiece(){
-  const cx = 0, cz = 4;     // centerpiece anchor (north of reception desk)
-  const ceilY = 4.2;        // matches addCeilLight height for the lobby
+  // Centerpiece sits at the exact lobby center so the chandelier hangs
+  // directly over the hub of the green lightning-tree that fans out
+  // across the floor. The floor inlay is the marble disc AROUND that
+  // hub; the tree branches emerge from under it.
+  const cx = 0, cz = 0;
+  const ceilY = 6.5;        // matches the raised lobby ceiling
 
   // ---- POLISHED FLOOR INLAY ----
   // A black-marble disc with brass mandala etching sits flush with the
@@ -2950,8 +2975,12 @@ function decorateLobbyCenterpiece(){
   scene.add(rim);
 
   // ---- FLANKING PYLONS ----
-  // Two black-obsidian columns on either side of the inlay frame the
-  // chandelier and add verticality to the otherwise empty lobby.
+  // Two black-obsidian columns. Shifted 3m north of the chandelier
+  // center so they're clear of the east/west tree branches (which
+  // run along z=0, the same axis the pylons used to sit on). Now
+  // they frame the path from the chandelier toward the Corr N
+  // doorway instead of straddling the trunk.
+  const pylonCz = cz + 3;
   const pylonMat = new THREE.MeshStandardMaterial({
     color: 0x0c1014, metalness: 0.55, roughness: 0.22,
     emissive: 0x040608, emissiveIntensity: 0.2
@@ -2960,63 +2989,72 @@ function decorateLobbyCenterpiece(){
     color: 0x5ad7e6, transparent: true, opacity: 0.85,
     emissive: 0x2a8a96, emissiveIntensity: 1.2
   });
+  // Pylons now 4.8m tall (was 3.3) for the raised 6.6 ceiling.
+  const pylonH     = 4.8;
+  const pylonCy    = pylonH / 2 + 0.18;   // center y above plinth
+  const stripeH    = 3.6;
+  const stripeCy   = pylonCy + 0.05;
   for(const px of [-5.2, 5.2]){
     // Plinth
     const plinth = new THREE.Mesh(
       new THREE.BoxGeometry(1.2, 0.18, 1.2),
       new THREE.MeshStandardMaterial({color:0x1a2024, metalness:0.4, roughness:0.5}));
-    plinth.position.set(px, 0.09, cz); scene.add(plinth);
-    // Shaft (slightly tapered via a couple of stacked boxes)
-    const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.85, 3.3, 0.85), pylonMat);
-    shaft.position.set(px, 1.83, cz); scene.add(shaft);
-    // Vertical neon stripe inset on the inward face — the "techno"
-    // tell. Both pylons face the chandelier center.
+    plinth.position.set(px, 0.09, pylonCz); scene.add(plinth);
+    // Shaft
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.85, pylonH, 0.85), pylonMat);
+    shaft.position.set(px, pylonCy, pylonCz); scene.add(shaft);
+    // Vertical neon stripe inset on the inward face
     const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.08, 2.4, 0.06), pylonStripeMat);
-    stripe.position.set(px + (px < 0 ? 0.43 : -0.43), 1.85, cz);
+      new THREE.BoxGeometry(0.08, stripeH, 0.06), pylonStripeMat);
+    stripe.position.set(px + (px < 0 ? 0.43 : -0.43), stripeCy, pylonCz);
     scene.add(stripe);
     // Capital
     const cap = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.18, 1.0), pylonMat);
-    cap.position.set(px, 3.57, cz); scene.add(cap);
-    // A small cyan accent puck on top — feeds light up to the chandelier
+    cap.position.set(px, pylonCy + pylonH/2 + 0.09, pylonCz); scene.add(cap);
+    // Cyan accent puck on top
     const puck = new THREE.Mesh(
       new THREE.CylinderGeometry(0.18, 0.18, 0.05, 18),
       new THREE.MeshBasicMaterial({color:0x9be8f0, transparent:true, opacity:0.9}));
-    puck.position.set(px, 3.7, cz); scene.add(puck);
+    puck.position.set(px, pylonCy + pylonH/2 + 0.22, pylonCz); scene.add(puck);
     const puckLight = new THREE.PointLight(0x5ad7e6, 0.35, 4.5);
-    puckLight.position.set(px, 3.85, cz); scene.add(puckLight);
-    // Collision so the player can't walk through the pylons
-    gs.walls.push({minX: px-0.45, maxX: px+0.45, minZ: cz-0.45, maxZ: cz+0.45});
+    puckLight.position.set(px, pylonCy + pylonH/2 + 0.37, pylonCz); scene.add(puckLight);
+    // Collision
+    gs.walls.push({minX: px-0.45, maxX: px+0.45, minZ: pylonCz-0.45, maxZ: pylonCz+0.45});
   }
 
-  // ---- WALL RELIEF (east wall, dressy plaque) ----
-  // Sits on the east interior wall facing west, opposite the player's
-  // approach. Catches the chandelier light beautifully on entry.
+  // ---- WALL RELIEF (north wall, east segment) ----
+  // The plaque used to sit on the east wall at z=4, but that clipped
+  // halfway into the Corr E doorway opening (z range -3..+3). Moved
+  // to the east half of the NORTH wall (x range 3..12), centered at
+  // x=7.5 — solid wall segment, no corridor openings, and right in
+  // the player's line of sight when they walk north from the desk.
+  const plaqueX = 7.5, plaqueZ = 11.94;
   const reliefMat = new THREE.MeshStandardMaterial({
     map: makeLobbyWallReliefTex(),
     roughness: 0.45, metalness: 0.7,
     emissive: 0x1a1208, emissiveIntensity: 0.18
   });
   const relief = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 2.1), reliefMat);
-  relief.position.set(11.94, 2.4, 4);
-  relief.rotation.y = -Math.PI/2;
+  relief.position.set(plaqueX, 3.0, plaqueZ);
+  relief.rotation.y = Math.PI;   // faces south into the lobby
   scene.add(relief);
-  // Brass frame around the plaque — two thin bars top and bottom
+  // Brass frame around the plaque — two thin bars top and bottom (now
+  // run along world X since the plaque is on a N-S-facing wall)
   const frameMat = new THREE.MeshStandardMaterial({
     color:0xc9a548, metalness:0.95, roughness:0.2,
     emissive:0x3a2a0a, emissiveIntensity:0.35
   });
-  for(const fy of [3.5, 1.3]){
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 4.4), frameMat);
-    bar.position.set(11.97, fy, 4); scene.add(bar);
+  for(const fy of [4.1, 1.9]){
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(4.4, 0.06, 0.04), frameMat);
+    bar.position.set(plaqueX, fy, 11.97); scene.add(bar);
   }
-  for(const fz of [4 - 2.15, 4 + 2.15]){
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.04, 2.3, 0.06), frameMat);
-    bar.position.set(11.97, 2.4, fz); scene.add(bar);
+  for(const fx of [plaqueX - 2.15, plaqueX + 2.15]){
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.3, 0.04), frameMat);
+    bar.position.set(fx, 3.0, 11.97); scene.add(bar);
   }
   // Tiny warm wash so the plaque actually reads from across the room
   const reliefWash = new THREE.PointLight(0xffd498, 0.6, 6);
-  reliefWash.position.set(10.6, 3.4, 4);
+  reliefWash.position.set(plaqueX, 4.0, 10.6);
   scene.add(reliefWash);
 
   // ---- THE CHANDELIER ----
@@ -3041,7 +3079,10 @@ function decorateLobbyCenterpiece(){
   });
 
   // ---- Suspension cables (4 from ceiling to crown hub) ----
-  const crownY = 3.45;
+  // Raised from 3.45 to 5.0 so the chandelier hangs dramatically in
+  // the new 6.5m lobby ceiling. Cables are ~1.5m long — reads as a
+  // proper hanging fixture, not a pendant on a thread.
+  const crownY = 5.0;
   for(let i=0;i<4;i++){
     const ang = (i/4) * Math.PI*2 + Math.PI/4;
     const ax = Math.cos(ang)*0.7, az = Math.sin(ang)*0.7;
@@ -3065,7 +3106,7 @@ function decorateLobbyCenterpiece(){
   group.add(collar);
 
   // ---- Outer ring ----
-  const outerY = 2.95;
+  const outerY = 4.5;
   const outerRing = new THREE.Group();
   outerRing.position.set(0, outerY, 0);
   group.add(outerRing);
@@ -3097,7 +3138,7 @@ function decorateLobbyCenterpiece(){
   }
 
   // ---- Inner ring (counter-rotates) ----
-  const innerY = 2.55;
+  const innerY = 4.1;
   const innerRing = new THREE.Group();
   innerRing.position.set(0, innerY, 0);
   group.add(innerRing);
@@ -3184,23 +3225,24 @@ function decorateLobbyCenterpiece(){
   const tooth = new THREE.Mesh(
     new THREE.ConeGeometry(0.18, 1.6, 8), toothMat);
   // Cone apex points down by default if we flip it
-  tooth.position.set(0, 1.6, 0);
+  tooth.position.set(0, 3.15, 0);
   tooth.rotation.x = Math.PI;   // apex down
   group.add(tooth);
   const toothLight = new THREE.PointLight(0x6fe89a, 0.55, 7);
-  toothLight.position.set(0, 1.4, 0); group.add(toothLight);
+  toothLight.position.set(0, 2.95, 0); group.add(toothLight);
   // Halo collar where the tooth meets the inner ring — sells the join
   const toothCollar = new THREE.Mesh(
     new THREE.TorusGeometry(0.18, 0.025, 8, 24), rimMat);
-  toothCollar.position.set(0, 2.35, 0);
+  toothCollar.position.set(0, 3.9, 0);
   toothCollar.rotation.x = Math.PI/2;
   group.add(toothCollar);
 
   // ---- Lower halo ring ----
   // A wide thin ring well below the rest, with no pendants, just a
   // glowing loop suspended in space. Sells "techno" hard.
+  const haloY = 3.4;
   const haloRing = new THREE.Group();
-  haloRing.position.set(0, 1.85, 0);
+  haloRing.position.set(0, haloY, 0);
   group.add(haloRing);
   const haloTorus = new THREE.Mesh(
     new THREE.TorusGeometry(2.05, 0.018, 6, 64),
@@ -3215,11 +3257,11 @@ function decorateLobbyCenterpiece(){
     const ang = (i/3)*Math.PI*2;
     const sx = Math.cos(ang)*0.8, sz = Math.sin(ang)*0.8;
     const ex = Math.cos(ang)*2.05, ez = Math.sin(ang)*2.05;
-    const len = Math.hypot(ex-sx, ez-sz, innerY - 1.85);
+    const len = Math.hypot(ex-sx, ez-sz, innerY - haloY);
     const wire = new THREE.Mesh(
       new THREE.CylinderGeometry(0.008, 0.008, len, 6), cableMat);
-    wire.position.set((sx+ex)/2, (innerY + 1.85)/2, (sz+ez)/2);
-    const dir = new THREE.Vector3(ex-sx, 1.85 - innerY, ez-sz).normalize();
+    wire.position.set((sx+ex)/2, (innerY + haloY)/2, (sz+ez)/2);
+    const dir = new THREE.Vector3(ex-sx, haloY - innerY, ez-sz).normalize();
     wire.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
     group.add(wire);
   }
@@ -7643,6 +7685,8 @@ function ceilingAt(x, z){
   if(z < -43) return 999;
   // Building A has a taller ceiling to accommodate the catwalk
   if(x >= 24 && x <= 56 && z >= -13 && z <= 13) return 6.0;
+  // Lobby is tall — chandelier hangs from ~6.5, room is cathedral-like
+  if(x >= -12 && x <= 12 && z >= -12 && z <= 12) return 6.5;
   return 4.3; // interior default (ceiling mesh bottom)
 }
 
