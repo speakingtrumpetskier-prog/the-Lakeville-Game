@@ -3776,25 +3776,55 @@ function updateCoolingAutomaton(dt){
 
 function _updateOneAutomaton(a, dt){
   if(!a) return;
-  // Rhythmic dance beat — combines two out-of-phase sine waves so the
-  // speed keeps swelling fast, then easing back, then cracking open
-  // again, rather than droning at a constant sinusoidal breath. Each
-  // dancer has its own rhythmPhase + rhythmFreq so they drift in and
-  // out of sync with each other as the room fills up.
-  if(a.state === 'dancing'){
-    const t = gs.time * (a.rhythmFreq || 0.55) + (a.rhythmPhase || 0);
-    const beat   = Math.sin(t);
-    const accent = Math.sin(t * 1.73 + 0.4);
-    // Asymmetric peak: bias positive, raise to a power so fast moments
-    // are sharp and slow moments are lingering (easing rhythm).
-    const mix = 0.5 + 0.5 * (beat * 0.7 + accent * 0.35);
-    const shaped = Math.pow(Math.max(0, mix), 1.35);
-    a.targetRotationSpeed = 0.12 + shaped * 0.95;   // ~0.12 to ~1.07 rad/s
+  // Clockwork rhythm: PUSH (ramp up) → FAST half-circle → DECEL (quick
+  // drop, like the spring ran out) → SLOW quarter-circle → next push.
+  // Each phase tracks its own accumulated angle so the geometry of the
+  // cycle is tied to how far the figure has turned, not elapsed time.
+  // Top speed is ~2.7 rad/s (2.5x the old sinusoidal top). Staggered
+  // starting phases are set at build time so the four dancers don't
+  // all peak or coast together — they fall in and out of sync.
+  const R = a.rhythm;   // { phase, cycleAngle, topSpeed, slowSpeed, accelRate, decelRate }
+  if(a.state === 'dancing' && R){
+    if(R.phase === 'push'){
+      a.rotationSpeed = Math.min(R.topSpeed,
+        a.rotationSpeed + R.accelRate * dt);
+      if(a.rotationSpeed >= R.topSpeed * 0.98){
+        a.rotationSpeed = R.topSpeed;
+        R.phase = 'fast';
+        R.cycleAngle = 0;
+      }
+    } else if(R.phase === 'fast'){
+      a.rotationSpeed = R.topSpeed;
+      R.cycleAngle += a.rotationSpeed * dt;
+      if(R.cycleAngle >= Math.PI){           // half circle done
+        R.phase = 'decel';
+      }
+    } else if(R.phase === 'decel'){
+      a.rotationSpeed = Math.max(R.slowSpeed,
+        a.rotationSpeed - R.decelRate * dt);
+      if(a.rotationSpeed <= R.slowSpeed * 1.05){
+        a.rotationSpeed = R.slowSpeed;
+        R.phase = 'slow';
+        R.cycleAngle = 0;
+      }
+    } else /* slow */ {
+      a.rotationSpeed = R.slowSpeed;
+      R.cycleAngle += a.rotationSpeed * dt;
+      if(R.cycleAngle >= Math.PI / 2){       // quarter circle done
+        R.phase = 'push';
+      }
+    }
+    a.targetRotationSpeed = a.rotationSpeed;
+  } else {
+    // Winding down — let the existing wind-down block drive target
+    // toward 0 and ease the current speed toward it.
+    a.rotationSpeed += (a.targetRotationSpeed - a.rotationSpeed) * Math.min(1, dt * 2.0);
   }
-  a.rotationSpeed += (a.targetRotationSpeed - a.rotationSpeed) * Math.min(1, dt * 2.0);
   a.turntable.rotation.y += a.rotationSpeed * dt;
   a.armSwayPhase += dt * (0.6 + a.rotationSpeed * 2.0);
-  const raise = Math.max(0, (a.rotationSpeed / 0.5));
+  // Cap the arm-sway amplitude factor so the higher top speed doesn't
+  // flail the arms into full 90° swings — stays expressive but readable.
+  const raise = Math.min(2.2, Math.max(0, a.rotationSpeed / 1.3));
 
   // Only pose the arms while dancing. After wind-down the arms are left in
   // their final dangled position — running this loop during 'dead' would
@@ -3815,7 +3845,11 @@ function _updateOneAutomaton(a, dt){
   // second overall, longer-lived, smaller, with soft drift rather than a
   // hard outward spray — the being is exhaling embers, not erupting.
   if(a.state === 'dancing' && a.emitterLocals){
-    const rate = 2 + a.rotationSpeed * 8;                // particles/sec
+    // Clamp rate at rotationSpeed=1.3 so the much-higher top speed
+    // (~2.7) doesn't flood the scene. Fast phase is still visibly
+    // busier than slow, just not 30+ particles/sec per dancer.
+    const rateSpeed = Math.min(1.3, a.rotationSpeed);
+    const rate = 2 + rateSpeed * 8;                      // particles/sec
     a._emitAcc = (a._emitAcc || 0) + dt * rate;
     while(a._emitAcc >= 1){
       a._emitAcc -= 1;
@@ -4457,8 +4491,24 @@ function buildWireDancer(cx, cy, cz){
     color: 0x14202c, transparent: true, opacity: 0.72
   });
   silMats.push(silhouetteMat);
-  const silTorso = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.26, 0.38, 1.55, 10), silhouetteMat);
+  // Hourglass silhouette — lathe profile goes wide hips → narrow waist
+  // → wide shoulders, then curls back in at the neck. Matches the
+  // wireframe cage built below. The lathe's y=0 is the center of the
+  // figure so the whole mesh is simply placed at body-center height.
+  const silProfile = [
+    new THREE.Vector2(0.05, -0.8),    // cinched foot of the lathe
+    new THREE.Vector2(0.34, -0.75),
+    new THREE.Vector2(0.40, -0.55),   // hips (wide)
+    new THREE.Vector2(0.35, -0.30),
+    new THREE.Vector2(0.20, -0.05),   // waist (narrow)
+    new THREE.Vector2(0.22,  0.05),
+    new THREE.Vector2(0.34,  0.40),   // chest
+    new THREE.Vector2(0.32,  0.65),   // shoulders
+    new THREE.Vector2(0.24,  0.78),   // shoulder cap → narrowing to neck
+    new THREE.Vector2(0.10,  0.80)
+  ];
+  const silTorsoGeo = new THREE.LatheGeometry(silProfile, 14);
+  const silTorso = new THREE.Mesh(silTorsoGeo, silhouetteMat);
   silTorso.position.y = 0.9; turntable.add(silTorso);
   const silHead = new THREE.Mesh(
     new THREE.SphereGeometry(0.23, 12, 9), silhouetteMat);
@@ -4467,11 +4517,30 @@ function buildWireDancer(cx, cy, cz){
     new THREE.CylinderGeometry(0.1, 0.14, 0.2, 8), silhouetteMat);
   silNeck.position.y = 1.78; turntable.add(silNeck);
 
-  const bodyEdges = new THREE.EdgesGeometry(new THREE.CylinderGeometry(0.32, 0.45, 1.6, 14, 4));
+  // Wireframe body cage — same hourglass profile as the silhouette,
+  // slightly larger radii so the wire outline sits outside the solid
+  // silhouette and still reads at a distance.
+  const bodyProfile = [
+    new THREE.Vector2(0.07, -0.8),
+    new THREE.Vector2(0.38, -0.75),
+    new THREE.Vector2(0.45, -0.55),
+    new THREE.Vector2(0.40, -0.30),
+    new THREE.Vector2(0.23, -0.05),
+    new THREE.Vector2(0.25,  0.05),
+    new THREE.Vector2(0.38,  0.40),
+    new THREE.Vector2(0.36,  0.65),
+    new THREE.Vector2(0.27,  0.78),
+    new THREE.Vector2(0.12,  0.80)
+  ];
+  const bodyGeo = new THREE.LatheGeometry(bodyProfile, 14);
+  const bodyEdges = new THREE.EdgesGeometry(bodyGeo);
   const body = new THREE.LineSegments(bodyEdges, wireMat.clone());
   body.position.y = 0.9; turntable.add(body);
+  // Rib rings sized to echo the hourglass: hips wide, waist narrow,
+  // chest wide. Positions translated back to absolute body-space (body
+  // is centered at y=0.9, lathe heights are ±0.8 around that).
   const ribMats = [];
-  for(const [by, r] of [[0.3, 0.45],[0.95, 0.38],[1.55, 0.3]]){
+  for(const [by, r] of [[0.35, 0.44],[0.9, 0.24],[1.35, 0.38]]){
     const ribEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(r, 0.015, 6, 22));
     const rib = new THREE.LineSegments(ribEdges, wireMat.clone());
     rib.material.color.setHex(0xcbf5ff); rib.material.opacity = 0.85;
@@ -4591,21 +4660,39 @@ function buildWireDancer(cx, cy, cz){
     }
   });
 
-  // Each dancer has its own rhythm: rhythmFreq shifts the cycle length
-  // a hair; rhythmPhase offsets the beat. Starts running so dancers are
-  // never all peaking on the same frame — feels like they're listening
-  // to the same music but reacting slightly differently.
-  const rhythmFreq  = 0.45 + Math.random() * 0.3;   // 0.45 – 0.75
-  const rhythmPhase = Math.random() * Math.PI * 2;
+  // Clockwork rhythm: start each dancer in a RANDOM phase of the cycle
+  // and at a random starting angle inside that phase, so four dancers
+  // in the same room are naturally staggered — one coasting, one
+  // ramping up, one already decelerating, etc. Top speed varies per
+  // dancer by ±10% so their half-circles take slightly different real
+  // time.
+  const phases = ['push', 'fast', 'decel', 'slow'];
+  const startPhase = phases[Math.floor(Math.random() * phases.length)];
+  const topSpeed  = 2.6 + Math.random() * 0.5;    // ~2.6–3.1 rad/s
+  const slowSpeed = 0.3 + Math.random() * 0.15;   // ~0.3–0.45 rad/s
+  const startCycleAngle = (startPhase === 'fast') ? Math.random() * Math.PI :
+                          (startPhase === 'slow') ? Math.random() * Math.PI/2 :
+                          0;
+  const startSpeed = (startPhase === 'fast')  ? topSpeed :
+                     (startPhase === 'slow')  ? slowSpeed :
+                     (startPhase === 'push')  ? slowSpeed + Math.random() * (topSpeed - slowSpeed) :
+                                                topSpeed - Math.random() * (topSpeed - slowSpeed);
   const dancer = {
     group: automaton,
     turntable, arms, heart, halo, jewel, headCore, eyes, mouth,
     automatonLight, rimLight,
     state: 'dancing',
-    rotationSpeed: 0.45,
-    targetRotationSpeed: 0.45,
+    rotationSpeed: startSpeed,
+    targetRotationSpeed: startSpeed,
     armSwayPhase: Math.random() * Math.PI * 2,
-    rhythmFreq, rhythmPhase,
+    rhythm: {
+      phase: startPhase,
+      cycleAngle: startCycleAngle,
+      topSpeed,
+      slowSpeed,
+      accelRate: topSpeed / 0.35,   // reach top in ~0.35s
+      decelRate: topSpeed / 0.15,   // crash to slow in ~0.15s (spring ran out)
+    },
     windStart: 0,
     windDuration: 10.0,
     wireMats,
