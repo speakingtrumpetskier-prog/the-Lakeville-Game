@@ -3776,43 +3776,32 @@ function updateCoolingAutomaton(dt){
 
 function _updateOneAutomaton(a, dt){
   if(!a) return;
-  // Clockwork rhythm: PUSH (ramp up) → FAST half-circle → DECEL (quick
-  // drop, like the spring ran out) → SLOW quarter-circle → next push.
-  // Each phase tracks its own accumulated angle so the geometry of the
-  // cycle is tied to how far the figure has turned, not elapsed time.
-  // Top speed is ~2.7 rad/s (2.5x the old sinusoidal top). Staggered
-  // starting phases are set at build time so the four dancers don't
-  // all peak or coast together — they fall in and out of sync.
-  const R = a.rhythm;   // { phase, cycleAngle, topSpeed, slowSpeed, accelRate, decelRate }
+  // Rhythm: the figure is ALWAYS either accelerating or decelerating —
+  // never holding a constant speed. Two phases, cycling continuously:
+  //   accel — 2 seconds ramp from slow → top  (smoothstep curve)
+  //   decel — 1 second  ramp from top → slow  (ease-out, "spring
+  //           running out" — sharp at the start of the decel, easing
+  //           as speed approaches the slow baseline)
+  // Cycle length is ~3s. Each dancer starts mid-phase at a random
+  // offset so the four in the room never drive the same beat.
+  const R = a.rhythm;
   if(a.state === 'dancing' && R){
-    if(R.phase === 'push'){
-      a.rotationSpeed = Math.min(R.topSpeed,
-        a.rotationSpeed + R.accelRate * dt);
-      if(a.rotationSpeed >= R.topSpeed * 0.98){
-        a.rotationSpeed = R.topSpeed;
-        R.phase = 'fast';
-        R.cycleAngle = 0;
-      }
-    } else if(R.phase === 'fast'){
-      a.rotationSpeed = R.topSpeed;
-      R.cycleAngle += a.rotationSpeed * dt;
-      if(R.cycleAngle >= Math.PI){           // half circle done
-        R.phase = 'decel';
-      }
-    } else if(R.phase === 'decel'){
-      a.rotationSpeed = Math.max(R.slowSpeed,
-        a.rotationSpeed - R.decelRate * dt);
-      if(a.rotationSpeed <= R.slowSpeed * 1.05){
-        a.rotationSpeed = R.slowSpeed;
-        R.phase = 'slow';
-        R.cycleAngle = 0;
-      }
-    } else /* slow */ {
-      a.rotationSpeed = R.slowSpeed;
-      R.cycleAngle += a.rotationSpeed * dt;
-      if(R.cycleAngle >= Math.PI / 2){       // quarter circle done
-        R.phase = 'push';
-      }
+    R.phaseT += dt;
+    const dur = (R.phase === 'accel') ? R.accelDuration : R.decelDuration;
+    const raw = Math.min(1, R.phaseT / dur);
+    let k;
+    if(R.phase === 'accel'){
+      // Smoothstep: gentle start, fastest in middle, gentle at top
+      k = raw * raw * (3 - 2 * raw);
+      a.rotationSpeed = R.slowSpeed + (R.topSpeed - R.slowSpeed) * k;
+    } else {
+      // Ease-out: sharp drop at the start, easing into the slow speed
+      k = 1 - Math.pow(1 - raw, 2.2);
+      a.rotationSpeed = R.topSpeed - (R.topSpeed - R.slowSpeed) * k;
+    }
+    if(raw >= 1){
+      R.phase = (R.phase === 'accel') ? 'decel' : 'accel';
+      R.phaseT = 0;
     }
     a.targetRotationSpeed = a.rotationSpeed;
   } else {
@@ -4491,21 +4480,23 @@ function buildWireDancer(cx, cy, cz){
     color: 0x14202c, transparent: true, opacity: 0.72
   });
   silMats.push(silhouetteMat);
-  // Hourglass silhouette — lathe profile goes wide hips → narrow waist
-  // → wide shoulders, then curls back in at the neck. Matches the
-  // wireframe cage built below. The lathe's y=0 is the center of the
-  // figure so the whole mesh is simply placed at body-center height.
+  // Hourglass silhouette — profile pinches to a NEEDLE point at the
+  // waist (y=0) so the figure looks more like two conic halves joined
+  // at a spike than a curvy human torso. Reads as inhuman, suggestive,
+  // more ceremonial than anatomical. Lathe y=0 is the center of the
+  // figure so the whole mesh sits at body-center height (0.9 world).
   const silProfile = [
-    new THREE.Vector2(0.05, -0.8),    // cinched foot of the lathe
-    new THREE.Vector2(0.34, -0.75),
-    new THREE.Vector2(0.40, -0.55),   // hips (wide)
-    new THREE.Vector2(0.35, -0.30),
-    new THREE.Vector2(0.20, -0.05),   // waist (narrow)
-    new THREE.Vector2(0.22,  0.05),
-    new THREE.Vector2(0.34,  0.40),   // chest
-    new THREE.Vector2(0.32,  0.65),   // shoulders
-    new THREE.Vector2(0.24,  0.78),   // shoulder cap → narrowing to neck
-    new THREE.Vector2(0.10,  0.80)
+    new THREE.Vector2(0.05, -0.80),   // cinched foot of the lathe
+    new THREE.Vector2(0.36, -0.72),
+    new THREE.Vector2(0.42, -0.50),   // hips (wide)
+    new THREE.Vector2(0.30, -0.25),
+    new THREE.Vector2(0.12, -0.08),
+    new THREE.Vector2(0.005, 0.0),    // waist — SHARP point (~5mm radius)
+    new THREE.Vector2(0.12,  0.08),
+    new THREE.Vector2(0.30,  0.30),
+    new THREE.Vector2(0.34,  0.55),   // chest (slightly less wide than hips)
+    new THREE.Vector2(0.26,  0.72),   // shoulders cinching
+    new THREE.Vector2(0.10,  0.80)    // neck
   ];
   const silTorsoGeo = new THREE.LatheGeometry(silProfile, 14);
   const silTorso = new THREE.Mesh(silTorsoGeo, silhouetteMat);
@@ -4517,30 +4508,30 @@ function buildWireDancer(cx, cy, cz){
     new THREE.CylinderGeometry(0.1, 0.14, 0.2, 8), silhouetteMat);
   silNeck.position.y = 1.78; turntable.add(silNeck);
 
-  // Wireframe body cage — same hourglass profile as the silhouette,
-  // slightly larger radii so the wire outline sits outside the solid
-  // silhouette and still reads at a distance.
+  // Wireframe body cage — same pinched-waist profile, slightly larger
+  // radii so the wire edges sit outside the solid silhouette. Keep the
+  // waist point tiny too so the wire gets the same suggestive cinch.
   const bodyProfile = [
-    new THREE.Vector2(0.07, -0.8),
-    new THREE.Vector2(0.38, -0.75),
-    new THREE.Vector2(0.45, -0.55),
-    new THREE.Vector2(0.40, -0.30),
-    new THREE.Vector2(0.23, -0.05),
-    new THREE.Vector2(0.25,  0.05),
-    new THREE.Vector2(0.38,  0.40),
-    new THREE.Vector2(0.36,  0.65),
-    new THREE.Vector2(0.27,  0.78),
+    new THREE.Vector2(0.07, -0.80),
+    new THREE.Vector2(0.40, -0.72),
+    new THREE.Vector2(0.46, -0.50),
+    new THREE.Vector2(0.34, -0.25),
+    new THREE.Vector2(0.14, -0.08),
+    new THREE.Vector2(0.01,  0.0),    // waist — essentially a line segment
+    new THREE.Vector2(0.14,  0.08),
+    new THREE.Vector2(0.34,  0.30),
+    new THREE.Vector2(0.38,  0.55),
+    new THREE.Vector2(0.29,  0.72),
     new THREE.Vector2(0.12,  0.80)
   ];
-  const bodyGeo = new THREE.LatheGeometry(bodyProfile, 14);
+  const bodyGeo = new THREE.LatheGeometry(bodyProfile, 16);
   const bodyEdges = new THREE.EdgesGeometry(bodyGeo);
   const body = new THREE.LineSegments(bodyEdges, wireMat.clone());
   body.position.y = 0.9; turntable.add(body);
-  // Rib rings sized to echo the hourglass: hips wide, waist narrow,
-  // chest wide. Positions translated back to absolute body-space (body
-  // is centered at y=0.9, lathe heights are ±0.8 around that).
+  // Rib rings — hip ring and chest ring only. Skip the waist ring
+  // because with the pinched profile there's nothing to ring there.
   const ribMats = [];
-  for(const [by, r] of [[0.35, 0.44],[0.9, 0.24],[1.35, 0.38]]){
+  for(const [by, r] of [[0.4, 0.45],[1.45, 0.37]]){
     const ribEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(r, 0.015, 6, 22));
     const rib = new THREE.LineSegments(ribEdges, wireMat.clone());
     rib.material.color.setHex(0xcbf5ff); rib.material.opacity = 0.85;
@@ -4660,23 +4651,25 @@ function buildWireDancer(cx, cy, cz){
     }
   });
 
-  // Clockwork rhythm: start each dancer in a RANDOM phase of the cycle
-  // and at a random starting angle inside that phase, so four dancers
-  // in the same room are naturally staggered — one coasting, one
-  // ramping up, one already decelerating, etc. Top speed varies per
-  // dancer by ±10% so their half-circles take slightly different real
-  // time.
-  const phases = ['push', 'fast', 'decel', 'slow'];
-  const startPhase = phases[Math.floor(Math.random() * phases.length)];
-  const topSpeed  = 2.6 + Math.random() * 0.5;    // ~2.6–3.1 rad/s
-  const slowSpeed = 0.3 + Math.random() * 0.15;   // ~0.3–0.45 rad/s
-  const startCycleAngle = (startPhase === 'fast') ? Math.random() * Math.PI :
-                          (startPhase === 'slow') ? Math.random() * Math.PI/2 :
-                          0;
-  const startSpeed = (startPhase === 'fast')  ? topSpeed :
-                     (startPhase === 'slow')  ? slowSpeed :
-                     (startPhase === 'push')  ? slowSpeed + Math.random() * (topSpeed - slowSpeed) :
-                                                topSpeed - Math.random() * (topSpeed - slowSpeed);
+  // Continuous accel/decel rhythm — each dancer starts mid-phase at a
+  // random offset so the four in the same room never drive the same
+  // beat. Top speed and durations vary ~10% per dancer so cycles drift
+  // relative to each other over time.
+  const topSpeed    = 2.5 + Math.random() * 0.5;    // ~2.5–3.0 rad/s
+  const slowSpeed   = 0.35 + Math.random() * 0.15;  // ~0.35–0.5 rad/s
+  const accelDur    = 1.8 + Math.random() * 0.5;    // ~1.8–2.3s ramp up
+  const decelDur    = 0.85 + Math.random() * 0.3;   // ~0.85–1.15s ramp down
+  const startPhase  = Math.random() < 0.5 ? 'accel' : 'decel';
+  const startT      = Math.random() * (startPhase === 'accel' ? accelDur : decelDur);
+  // Compute starting rotationSpeed from phase position so the figure
+  // doesn't pop into a new speed on its first frame.
+  const startRaw = Math.min(1, startT / (startPhase === 'accel' ? accelDur : decelDur));
+  const startK = startPhase === 'accel'
+    ? startRaw * startRaw * (3 - 2 * startRaw)
+    : 1 - Math.pow(1 - startRaw, 2.2);
+  const startSpeed = startPhase === 'accel'
+    ? slowSpeed + (topSpeed - slowSpeed) * startK
+    : topSpeed - (topSpeed - slowSpeed) * startK;
   const dancer = {
     group: automaton,
     turntable, arms, heart, halo, jewel, headCore, eyes, mouth,
@@ -4687,11 +4680,11 @@ function buildWireDancer(cx, cy, cz){
     armSwayPhase: Math.random() * Math.PI * 2,
     rhythm: {
       phase: startPhase,
-      cycleAngle: startCycleAngle,
+      phaseT: startT,
       topSpeed,
       slowSpeed,
-      accelRate: topSpeed / 0.35,   // reach top in ~0.35s
-      decelRate: topSpeed / 0.15,   // crash to slow in ~0.15s (spring ran out)
+      accelDuration: accelDur,
+      decelDuration: decelDur,
     },
     windStart: 0,
     windDuration: 10.0,
