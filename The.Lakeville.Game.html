@@ -1576,7 +1576,7 @@ function buildLevel(){
   }
 
   // Rooms
-  const lobbyRoom = addRoom('Lobby', 0,0, 24,24, 9.0);   // cathedral-tall lobby for the chandelier
+  const lobbyRoom = addRoom('Lobby', 0,0, 24,24, 10.5);   // cathedral-tall lobby for the chandelier
   addRoom('Server Hall A', 40,0, 32,26, 6.0);
   addRoom('Substation', -40,0, 28,22);
   addRoom('Cooling Tower 03', 0,34, 28,28);
@@ -1587,26 +1587,27 @@ function buildLevel(){
   addRoom('Corr N', 0,16, 6,8);
   addRoom('Corr F', 0, 50, 6, 12);
 
-  // Lobby ceiling is 9m up — far enough from lamp range that without a
-  // little self-emission it reads as "odd black top." A dim emissive
-  // warms the cathedral vault so the raised height is legible from the
-  // floor. Cloned material so other ceilings stay unchanged.
+  // Lobby ceiling is 10.5m up — far enough from lamp range that without
+  // self-emission it reads as "odd black top." A dim emissive warms the
+  // cathedral vault so the raised height is legible from the floor.
+  // Boosted ~30% (0.45 → 0.6 intensity, color slightly warmer) from the
+  // 9m-ceiling tuning to match the taller room.
   if(lobbyRoom && lobbyRoom.ceil){
     const lobbyCeilMat = lobbyRoom.ceil.material.clone();
-    lobbyCeilMat.emissive = new THREE.Color(0x1c2a22);
-    lobbyCeilMat.emissiveIntensity = 0.45;
+    lobbyCeilMat.emissive = new THREE.Color(0x243828);
+    lobbyCeilMat.emissiveIntensity = 0.6;
     lobbyRoom.ceil.material = lobbyCeilMat;
   }
 
   // Lobby walls with gaps toward corridors. South wall is SEALED — the
   // Community Development corridor is cut in this build, so the lobby
   // south wall is now solid (OLAM signage hangs on it from the inside).
-  // Walls are 9m tall to match the raised lobby ceiling so the
+  // Walls are 10.5m tall to match the raised lobby ceiling so the
   // skybox isn't visible above the wall tops.
-  addWallWithGap('x', 12, -12, 12, 0, 6, 9.0);    // north wall: gap → Corr N
-  addWall(-12, -12, 12, -12, 9.0);                // south wall: SEALED
-  addWallWithGap('z', 12, -12, 12, 0, 6, 9.0);    // east wall:  gap → Corr E
-  addWallWithGap('z', -12, -12, 12, 0, 6, 9.0);   // west wall:  gap → Corr W
+  addWallWithGap('x', 12, -12, 12, 0, 6, 10.5);   // north wall: gap → Corr N
+  addWall(-12, -12, 12, -12, 10.5);               // south wall: SEALED
+  addWallWithGap('z', 12, -12, 12, 0, 6, 10.5);   // east wall:  gap → Corr E
+  addWallWithGap('z', -12, -12, 12, 0, 6, 10.5);  // west wall:  gap → Corr W
   // Lintels above each lobby corridor doorway — seal the vertical void
   // between the (shorter) corridor ceiling and the raised lobby ceiling.
   //
@@ -1624,19 +1625,18 @@ function buildLevel(){
   const lobbyLintelMat = new THREE.MeshStandardMaterial({
     color:0x1a2520, roughness:0.7, metalness:0.25
   });
-  // Corr N — corridor ceiling bottom y=4.3, lobby ceiling bottom y=8.9.
-  // Lintel y=4.3..8.9, thickness 0.2m in z (wall plane z=12),
-  // 5.8m wide in x (z-inset 0.1 each side of the 6m gap).
-  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(5.8, 4.6, 0.2), lobbyLintelMat);
-  lintelN.position.set(0, 6.6, 12); scene.add(lintelN);
-  // Corr W — same 4.3..8.9 span, 0.2m thick in x at wall plane x=-12,
-  // 5.8m wide in z.
-  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.6, 5.8), lobbyLintelMat);
-  lintelW.position.set(-12, 6.6, 0); scene.add(lintelW);
+  // Corr N — corridor ceiling bottom y=4.3, lobby ceiling bottom y=10.4.
+  // Lintel y=4.3..10.4 (6.1m tall, center 7.35), thickness 0.2m in z
+  // (wall plane z=12), 5.8m wide in x (z-inset 0.1 each side of the 6m gap).
+  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(5.8, 6.1, 0.2), lobbyLintelMat);
+  lintelN.position.set(0, 7.35, 12); scene.add(lintelN);
+  // Corr W — same 4.3..10.4 span, 0.2m thick in x at wall plane x=-12.
+  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.2, 6.1, 5.8), lobbyLintelMat);
+  lintelW.position.set(-12, 7.35, 0); scene.add(lintelW);
   // Corr E — corridor ceiling bottom y=5.9 (ceilingY=6.0), lobby ceiling
-  // bottom y=8.9. Lintel y=5.9..8.9, 3.0m tall.
-  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.0, 5.8), lobbyLintelMat);
-  lintelE.position.set(12, 7.4, 0); scene.add(lintelE);
+  // bottom y=10.4. Lintel y=5.9..10.4, 4.5m tall, center 8.15.
+  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.5, 5.8), lobbyLintelMat);
+  lintelE.position.set(12, 8.15, 0); scene.add(lintelE);
 
   // Server hall (taller — accommodates the catwalk and head clearance)
   addWallWithGap('z', 24, -13, 13, 0, 6, 6.0);
@@ -2964,35 +2964,37 @@ function decorateLobby(){
   gs.dualSigns = { cover:[logo, sub], truth:[truthLogo, truthSub] };
   addPlant(-8, 0, -8);
   addPlant(8, 0, -8);
-  // Cathedral lobby (9m ceiling) — ambient ceiling lights sit just
-  // under the ceiling mesh and use a much longer range so the room
-  // still reads as lit all the way down to the floor.
+  // Cathedral lobby (10.5m ceiling) — ambient ceiling lights sit just
+  // under the ceiling mesh. Intensities bumped ~30% from the previous
+  // 9m tuning so the lobby doesn't read as dark at the new height.
   const lobbyCeilLights = [
-    addCeilLight(0, 8.7, -6, 0xbfe6c6, 1.2, 36),  // over spawn approach
-    addCeilLight(-8, 8.7, 6, 0x8ee39c, 0.6, 22),
-    addCeilLight(8, 8.7, 6, 0x8ee39c, 0.6, 22),
+    addCeilLight(0, 10.2, -6, 0xbfe6c6, 1.6, 44),  // over spawn approach
+    addCeilLight(-8, 10.2, 6, 0x8ee39c, 0.8, 28),
+    addCeilLight(8, 10.2, 6, 0x8ee39c, 0.8, 28),
   ];
   // The default addCeilLight() creates a short 3.2m volumetric cone —
   // in a normal 4.4m-ceiling room it hangs down to about head height
-  // and reads as a shaft of light. In a 9m lobby those cones sit
+  // and reads as a shaft of light. In a 10.5m lobby those cones sit
   // stranded up near the ceiling. Stretch each cone down so it's
   // visible all the way to the floor — sells the cathedral height.
+  // Cone opacity ~30% higher (0.18 → 0.23) so the light shafts are
+  // more visible and the room reads brighter overall.
   for(const f of lobbyCeilLights){
     if(!f.cone) continue;
     scene.remove(f.cone);
-    const grow = 7.5;                           // cone height
-    const coneGeo = new THREE.ConeGeometry(2.2, grow, 20, 1, true);
+    const grow = 9.5;                           // cone height (10.5m ceiling)
+    const coneGeo = new THREE.ConeGeometry(2.6, grow, 20, 1, true);
     const coneTex = (()=>{
       const c=document.createElement('canvas'); c.width=32; c.height=128;
       const g=c.getContext('2d');
       const grad = g.createLinearGradient(0,0,0,128);
-      grad.addColorStop(0, 'rgba(255,255,255,0.5)');
+      grad.addColorStop(0, 'rgba(255,255,255,0.55)');
       grad.addColorStop(1, 'rgba(255,255,255,0.0)');
       g.fillStyle = grad; g.fillRect(0,0,32,128);
       return new THREE.CanvasTexture(c);
     })();
     const longCone = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({
-      map: coneTex, color: f.baseColor, transparent:true, opacity:0.18,
+      map: coneTex, color: f.baseColor, transparent:true, opacity:0.23,
       depthWrite:false, side:THREE.DoubleSide,
       blending:THREE.AdditiveBlending, fog:true
     }));
@@ -3020,7 +3022,7 @@ function decorateLobbyCenterpiece(){
   // across the floor. The floor inlay is the marble disc AROUND that
   // hub; the tree branches emerge from under it.
   const cx = 0, cz = 0;
-  const ceilY = 8.9;        // matches the cathedral lobby ceiling (9.0 - 0.1)
+  const ceilY = 10.4;       // matches the cathedral lobby ceiling (10.5 - 0.1)
 
   // ---- POLISHED FLOOR INLAY ----
   // A black-marble disc with brass mandala etching sits flush with the
@@ -3042,7 +3044,7 @@ function decorateLobbyCenterpiece(){
   // activation source for the green pattern radiating out from it.
   const rimMat = new THREE.MeshStandardMaterial({
     color:0xc9a548, metalness:0.95, roughness:0.18,
-    emissive:0x3a2a0a, emissiveIntensity:0.3
+    emissive:0x1faa3c, emissiveIntensity:0.9
   });
   const rim = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.04, 8, 64), rimMat);
   rim.rotation.x = Math.PI/2;
@@ -3052,8 +3054,7 @@ function decorateLobbyCenterpiece(){
     rimMat,
     cx, cz,
     radius: 3.6,
-    activation: 0,     // 0 = dormant (bronze); 1 = fully lit (green)
-    bronzeEmissive: new THREE.Color(0x3a2a0a),
+    activation: 0,     // 0 = off-disc (steady green pulse); 1 = on-disc (brighter, faster pulse)
     greenEmissive:  new THREE.Color(0x1faa3c)   // matches lobby network hex 0x00ff44 toned for emissive
   };
 
@@ -3263,8 +3264,10 @@ function decorateLobbyCenterpiece(){
     orb.position.set(px, outerY - L - 0.08, pz);
     outerRing.add(orb);
     orbs.push(orb);
-    // Point light at the orb
-    const pl = new THREE.PointLight(0x6ad9e6, 0.55, 9);
+    // Point light at the orb — intensity bumped ~30% over the 9m-ceiling
+    // tuning to match the new 10.5m cathedral lobby (rest of the lobby
+    // lighting was lifted proportionally).
+    const pl = new THREE.PointLight(0x6ad9e6, 0.72, 11);
     pl.position.set(px, outerY - L - 0.08, pz);
     outerRing.add(pl);
     pointLights.push(pl);
@@ -3291,7 +3294,7 @@ function decorateLobbyCenterpiece(){
     orb.position.set(px, innerY - L - 0.06, pz);
     innerRing.add(orb);
     orbs.push(orb);
-    const pl = new THREE.PointLight(0xb088ff, 0.32, 6);
+    const pl = new THREE.PointLight(0xb088ff, 0.42, 7.5);
     pl.position.set(px, innerY - L - 0.06, pz);
     innerRing.add(pl);
     pointLights.push(pl);
@@ -3311,7 +3314,7 @@ function decorateLobbyCenterpiece(){
   tooth.position.set(0, 3.15, 0);
   tooth.rotation.x = Math.PI;   // apex down
   group.add(tooth);
-  const toothLight = new THREE.PointLight(0x6fe89a, 0.55, 7);
+  const toothLight = new THREE.PointLight(0x6fe89a, 0.72, 9);
   toothLight.position.set(0, 2.95, 0); group.add(toothLight);
   // Halo collar where the tooth meets the inner ring — sells the join
   const toothCollar = new THREE.Mesh(
@@ -3417,11 +3420,12 @@ function updateLobbyChandelier(dt){
   }
 }
 
-// Brass rim under the chandelier. Dormant (bronze, dim) until the
-// player steps onto the disc, then shifts emissive toward the
-// network's searing lobby green and starts a slow pulse. The rim is
-// the visible "source" of the lightning-tree branches radiating out
-// from it.
+// Brass rim under the chandelier. Always glows bright green so it
+// reads as the clear source of the green floor lines radiating out
+// from it — from any angle, outside or inside the disc, the rim is
+// visibly the origin of the pattern. Standing on the disc intensifies
+// the pulse (brighter, quicker) so the rim still gives feedback on
+// foot-presence, but there's no dormant bronze state.
 function updateLobbyCircle(dt){
   const lc = gs.lobbyCircle;
   if(!lc || !lc.rimMat) return;
@@ -3436,11 +3440,15 @@ function updateLobbyCircle(dt){
   const k = inside ? Math.min(1, dt * 2.8) : Math.min(1, dt * 1.1);
   lc.activation += (target - lc.activation) * k;
   const a = lc.activation;
-  // Emissive color: bronze ↔ green lerp.
-  lc.rimMat.emissive.copy(lc.bronzeEmissive).lerp(lc.greenEmissive, a);
-  // Emissive intensity: baseline 0.3 + activated pulse up to ~1.6.
-  const pulse = 0.9 + Math.sin(gs.time * 2.6) * 0.35;
-  lc.rimMat.emissiveIntensity = 0.3 + a * pulse;
+  // Emissive is always green — the rim matches the floor lines so the
+  // lines visibly emanate from it. Only the intensity responds to the
+  // player stepping onto the disc.
+  lc.rimMat.emissive.copy(lc.greenEmissive);
+  // Baseline: slow pulse ~0.7–1.0 (reads as actively lit from any
+  // angle). Active addition: faster, stronger pulse on top.
+  const baseline = 0.85 + Math.sin(gs.time * 1.7) * 0.15;
+  const activePeak = 1.7 + Math.sin(gs.time * 2.6) * 0.4;
+  lc.rimMat.emissiveIntensity = baseline + a * (activePeak - baseline);
 }
 
 function decorateServerHall(){
@@ -4776,14 +4784,13 @@ function updateCoolingAutomaton(dt){
 function _updateOneAutomaton(a, dt){
   if(!a) return;
   // Three-phase merry-go-round rhythm (set up in buildWireDancer):
-  //   accel — 1.4–1.9s burst. Ease-out curve (rapid rise, tapering
-  //           as it nears top). The "shove."
-  //   peak  — 0.3–0.55s hold at top. Brief by design — the fast part
-  //           is the impression of momentum, not a plateau.
-  //   decel — 2.0–2.4s steady, near-linear fall back to the slow
+  //   accel — 0.85–1.15s burst. Ease-out pow 2.8 (punchy rise,
+  //           tapering as it nears top). The "shove."
+  //   peak  — 0.18–0.33s hold at top. Very brief — the fast part is
+  //           the impression of momentum, not a plateau.
+  //   decel — 1.2–1.45s steady, near-linear fall back to the slow
   //           baseline. Friction bleeding off angular momentum.
-  // Cycle length ~3.7–4.85s. Each dancer started mid-phase at a random
-  // offset with numbers ±10% so cycles drift relative to each other.
+  // Cycle length ~2.23–2.93s (~60% of the previous tuning).
   const R = a.rhythm;
   if(a.state === 'dancing' && R){
     R.phaseT += dt;
@@ -4792,10 +4799,10 @@ function _updateOneAutomaton(a, dt){
               :                       R.decelDuration;
     const raw = Math.min(1, R.phaseT / dur);
     if(R.phase === 'accel'){
-      // Ease-out: 1 − (1−raw)^2.2. At raw=0.3, k≈0.54 (54% of range
-      // covered in 30% of time — rapid early rise). At raw=0.7, k≈0.91.
-      // Most of the speed-up happens in the first half of the burst.
-      const k = 1 - Math.pow(1 - raw, 2.2);
+      // Ease-out: 1 − (1−raw)^2.8 (steeper than previous 2.2). At
+      // raw=0.3, k≈0.65 (65% of range covered in 30% of time — very
+      // punchy initial rise). Tapers smoothly into the peak.
+      const k = 1 - Math.pow(1 - raw, 2.8);
       a.rotationSpeed = R.slowSpeed + (R.topSpeed - R.slowSpeed) * k;
     } else if(R.phase === 'peak'){
       // Hold at top. Kept short — the dancer reads as momentarily
@@ -5661,24 +5668,23 @@ function buildWireDancer(cx, cy, cz){
     }
   });
 
-  // Rhythm — merry-go-round model. Somebody shoves the carousel every
-  // few seconds: a short burst that ramps up fast and slows as it nears
-  // the top; a brief moment at peak; then momentum bleeds off steadily
-  // for ~2s until the next shove. The three phases:
-  //   accel — 1.4–1.9s burst. Ease-out: rate is fastest early and
-  //           tapers as it approaches the top. ("Rate of acceleration
-  //           slows near top speed.")
-  //   peak  — 0.3–0.55s at top. Kept short on purpose — the fast part
-  //           is an impression, not a plateau.
-  //   decel — 2.0–2.4s steady, nearly-linear fall back to slow.
+  // Rhythm — merry-go-round model, punched up. Shorter cycle (~60% of
+  // the previous tuning) with a steeper accel curve so the shove feels
+  // more immediate. The three phases:
+  //   accel — 0.85–1.15s burst. Ease-out (pow 2.8): fastest growth in
+  //           the first ~30% of the phase, then tapering as it nears
+  //           the top.
+  //   peak  — 0.18–0.33s at top. Very brief; the fast part is the
+  //           impression of momentum, not a plateau.
+  //   decel — 1.2–1.45s steady, nearly-linear fall back to slow.
   // Each dancer randomizes numbers ~10% so four in the same room drift
   // out of sync over time; each starts mid-phase at a random offset so
   // they never pop into existence together.
   const topSpeed    = 3.25 + Math.random() * 0.65;  // ~3.25–3.9 rad/s
   const slowSpeed   = 0.45 + Math.random() * 0.2;   // ~0.45–0.65 rad/s
-  const accelDur    = 1.4 + Math.random() * 0.5;    // ~1.4–1.9s burst
-  const peakDur     = 0.3 + Math.random() * 0.25;   // ~0.3–0.55s at top
-  const decelDur    = 2.0 + Math.random() * 0.4;    // ~2.0–2.4s fall
+  const accelDur    = 0.85 + Math.random() * 0.3;   // ~0.85–1.15s burst
+  const peakDur     = 0.18 + Math.random() * 0.15;  // ~0.18–0.33s at top
+  const decelDur    = 1.2 + Math.random() * 0.25;   // ~1.2–1.45s fall
   const phases      = ['accel', 'peak', 'decel'];
   const startPhase  = phases[Math.floor(Math.random() * phases.length)];
   const startDur    = startPhase === 'accel' ? accelDur
@@ -5689,7 +5695,7 @@ function buildWireDancer(cx, cy, cz){
   // doesn't pop into a new speed on its first frame.
   const startRaw    = Math.min(1, startT / startDur);
   const startK      = startPhase === 'accel'
-    ? (1 - Math.pow(1 - startRaw, 2.2))
+    ? (1 - Math.pow(1 - startRaw, 2.8))
     : startPhase === 'peak'
       ? 1
       : (startRaw * 0.94 + Math.pow(startRaw, 1.6) * 0.06);
@@ -7822,8 +7828,8 @@ function ceilingAt(x, z){
   if(z < -43) return 999;
   // Building A has a taller ceiling to accommodate the catwalk
   if(x >= 24 && x <= 56 && z >= -13 && z <= 13) return 6.0;
-  // Lobby is a cathedral — 9m ceiling (mesh bottom at 8.9)
-  if(x >= -12 && x <= 12 && z >= -12 && z <= 12) return 8.9;
+  // Lobby is a cathedral — 10.5m ceiling (mesh bottom at 10.4)
+  if(x >= -12 && x <= 12 && z >= -12 && z <= 12) return 10.4;
   return 4.3; // interior default (ceiling mesh bottom)
 }
 
