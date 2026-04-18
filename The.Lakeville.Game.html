@@ -1303,6 +1303,21 @@ class AudioEngine {
     this._alert = v;
     if(this.musicGain) this.musicGain.gain.value = 0.1 + v*0.18;
   }
+  // Permanently silence the theme of a given room: delete the theme
+  // function so any future setRoom(roomName) calls see hasTheme=false
+  // and fade the themeGain to 0 on entry. If we're currently in that
+  // room, ramp the existing theme gain down over `duration` seconds.
+  silenceRoom(roomName, duration = 1.5){
+    if(!this._themes) return;
+    const names = Array.isArray(roomName) ? roomName : [roomName];
+    for(const n of names) delete this._themes[n];
+    if(this._themeGain && names.includes(this._room)){
+      const tn = this.now();
+      this._themeGain.gain.cancelScheduledValues(tn);
+      this._themeGain.gain.setValueAtTime(this._themeGain.gain.value, tn);
+      this._themeGain.gain.linearRampToValueAtTime(0, tn + duration);
+    }
+  }
   setRoom(name){
     const next = name || '(none)';
     if(this._room !== next){
@@ -3272,6 +3287,37 @@ function decorateSubstation(){
   // Dim ambient ceiling light — intensity 0 at start.
   const ceilL = addCeilLight(-40, 4.2, 0, 0xff6820, 0.0, 18);
   trap.ceilLight = ceilL;
+
+  // Pre-allocate the lights used by the boss-defeat resolution sequence
+  // so they don't have to be constructed mid-gameplay — adding a new
+  // PointLight forces the WebGL renderer to recompile its lighting
+  // shader variants, which causes a multi-second hitch on slow GPUs.
+  // We attach them dark and flip intensity when the sequence needs them.
+  trap.fireLight = new THREE.PointLight(0xff6020, 0, 10);
+  trap.fireLight.position.set(-40, 1.2, 0);
+  scene.add(trap.fireLight);
+  trap.alarmLamps = [];
+  const alarmSpots = [
+    { x: -40, y: 3.5, z:  10.4, facing: -1 },
+    { x: -40, y: 3.5, z: -10.4, facing:  1 },
+  ];
+  for(const sp of alarmSpots){
+    const housingMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a, metalness: 0.7, roughness: 0.4
+    });
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.32, 0.18), housingMat);
+    housing.position.set(sp.x, sp.y, sp.z);
+    scene.add(housing);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0x202020 });
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), beaconMat);
+    beacon.position.set(sp.x, sp.y + 0.05, sp.z + sp.facing * 0.12);
+    scene.add(beacon);
+    const pl = new THREE.PointLight(0xffffff, 0, 10);
+    pl.position.set(sp.x, sp.y + 0.05, sp.z + sp.facing * 0.25);
+    scene.add(pl);
+    trap.alarmLamps.push({ housing, beacon, beaconMat, pl, phase: Math.random()*Math.PI*2 });
+  }
+
   const s = makeSignMesh('XCEL INTERCONNECT — SUBSTATION', 0xffa040);
   s.position.set(-40, 3.7, 10.8); s.rotation.y = Math.PI; scene.add(s);
 
@@ -3428,7 +3474,7 @@ function substationSpawnInspector(){
     const e = new Enemy('bot', new THREE.Vector3(spawn.x, 0, spawn.z));
     e.substationTrapEnemy = true;
     e.isInspector = true;
-    e.mesh.scale.set(1.45, 1.45, 1.45);
+    e.mesh.scale.set(1.15, 1.15, 1.15);
     // Tougher than a standard bot: ~30% more HP than the previous 220
     // baseline. Armor reads heavier and the fight stretches out — you
     // have to actually work to drop this one.
@@ -3772,23 +3818,18 @@ function updateSubstationTrap(dt){
           0.9 + Math.random()*0.5, 0.045
         );
       }
-      // Pulsing fire light — one PointLight from the pool-ish approach
-      // (create once, keep around through the sequence).
-      if(!trap.fireLight){
-        trap.fireLight = new THREE.PointLight(0xff6020, 0, 10);
+      // Pre-allocated fire light — just move it to the boss position
+      // and flicker intensity with the flame curve.
+      if(trap.fireLight){
         trap.fireLight.position.set(p.x, p.y + 0.8, p.z);
-        scene.add(trap.fireLight);
+        const flick = 0.75 + Math.random()*0.5;
+        trap.fireLight.intensity = fireI * 4.2 * flick;
+        trap.fireLight.color.setHex(
+          Math.random() < 0.3 ? 0xffa040 : 0xff6020
+        );
       }
-      // Flicker + scale with fire intensity
-      const flick = 0.75 + Math.random()*0.5;
-      trap.fireLight.intensity = fireI * 4.2 * flick;
-      trap.fireLight.color.setHex(
-        Math.random() < 0.3 ? 0xffa040 : 0xff6020
-      );
-    } else if(trap.fireLight && !trap.fireLightRemoved){
-      trap.fireLightRemoved = true;
-      scene.remove(trap.fireLight);
-      trap.fireLight = null;
+    } else if(trap.fireLight && trap.fireLight.intensity > 0){
+      trap.fireLight.intensity = 0;
     }
 
     // Phase 2: fire alarm setup at t=4s
@@ -3878,11 +3919,12 @@ function updateSubstationTrap(dt){
         trap.ceilLight.light.intensity = 0.15;
         trap.ceilLight.base = 0.15;
       }
-      // Kill the fire light (in case it lingered)
-      if(trap.fireLight){
-        scene.remove(trap.fireLight);
-        trap.fireLight = null;
-      }
+      // Kill the fire light (pre-allocated; just drop intensity)
+      if(trap.fireLight){ trap.fireLight.intensity = 0; }
+      // Substation theme goes permanently silent — the room's spent,
+      // there's nothing more to underscore. 1.5s fade so it doesn't
+      // cut awkwardly the moment the bars raise.
+      audio.silenceRoom(['Substation', 'Xcel Interconnect'], 1.5);
       // Finally remove the inspector corpse — it's been extinguished
       // by the sprinklers. Small puff of smoke as it disappears.
       if(trap.inspector && trap.inspector.mesh && trap.inspector.mesh.parent){
@@ -3905,33 +3947,11 @@ function updateSubstationTrap(dt){
 }
 
 // ---- Fire alarm helpers ----
-// Two white rotating beacons mounted on the substation side walls, plus
-// a repeating two-tone siren. Set up once at phase 2 (t=4s), blink
-// during phases 2–4, shut down when the sequence ends.
+// The wall beacons (housing + beacon sphere + PointLight) are
+// pre-allocated in decorateSubstation so adding them mid-sequence
+// doesn't kick off a shader recompile hitch. Setup here just kicks
+// off the siren beep loop; the lamps get driven by _updateSubstationFireAlarm.
 function _setupSubstationFireAlarm(trap){
-  trap.alarmLamps = [];
-  // Lamp housings + beacon spheres on the north and south long walls
-  // of the substation (z=±10.5, mid-height y=3.5).
-  const spots = [
-    { x: -40, y: 3.5, z:  10.4, facing: -1 },
-    { x: -40, y: 3.5, z: -10.4, facing:  1 },
-  ];
-  for(const s of spots){
-    const housingMat = new THREE.MeshStandardMaterial({
-      color: 0x1a1a1a, metalness: 0.7, roughness: 0.4
-    });
-    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.32, 0.18), housingMat);
-    housing.position.set(s.x, s.y, s.z);
-    scene.add(housing);
-    const beaconMat = new THREE.MeshBasicMaterial({ color: 0x202020 });
-    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), beaconMat);
-    beacon.position.set(s.x, s.y + 0.05, s.z + s.facing * 0.12);
-    scene.add(beacon);
-    const pl = new THREE.PointLight(0xffffff, 0, 10);
-    pl.position.set(s.x, s.y + 0.05, s.z + s.facing * 0.25);
-    scene.add(pl);
-    trap.alarmLamps.push({ housing, beacon, beaconMat, pl, phase: Math.random()*Math.PI*2 });
-  }
   trap.alarmBeepActive = true;
   _substationAlarmBeep(trap);
 }
@@ -6972,12 +6992,12 @@ function fireWeapon(){
     // passing through without registering" until the bot stepped
     // close enough to cover with lower-body shots.
     const bodyY = e.type==='boss'    ? 0.8 :
-                  e.isInspector      ? 1.7 :
+                  e.isInspector      ? 1.35 :   // 1.15x scale — torso center ~y=1.55
                   e.type==='bot'     ? 1.0 :
                   e.type==='turret'  ? 1.0 :
                   /* drone */          1.0;
     const bodyR = e.type==='boss'    ? 1.9 :
-                  e.isInspector      ? 1.15 :
+                  e.isInspector      ? 0.95 :
                   e.type==='bot'     ? 0.8 :
                   e.type==='turret'  ? 0.9 : 0.45;
     const bodyCtr = new THREE.Vector3(e.pos.x, e.pos.y + bodyY, e.pos.z);
@@ -6985,10 +7005,10 @@ function fireWeapon(){
     if(d!==null && d<hitEnemyDist){ hitEnemy = e; hitEnemyDist = d; headshot = false; }
     // Head shot for humanoid (bot) and drone
     if(e.type==='bot' || e.type==='drone'){
-      const headY = e.isInspector     ? 3.25 :
+      const headY = e.isInspector     ? 2.6 :    // 1.15x * 2.23 = ~2.56
                     e.type==='bot'    ? 2.25 :
                                         0.1;
-      const headR = e.isInspector ? 0.55 : (e.type==='bot' ? 0.3 : 0.22);
+      const headR = e.isInspector ? 0.45 : (e.type==='bot' ? 0.3 : 0.22);
       const headCtr = new THREE.Vector3(e.pos.x, e.pos.y + headY, e.pos.z);
       const dh = rayHitsSphere(origin, dir, headCtr, headR, WEAPON_RANGE);
       if(dh!==null && dh<hitEnemyDist){ hitEnemy = e; hitEnemyDist = dh; headshot = true; }
