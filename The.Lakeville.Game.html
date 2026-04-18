@@ -4279,65 +4279,57 @@ function decorateCooling(){
   s.position.set(0, 3.7, 20.8); scene.add(s);
   addEvidencePickup('water', 0, 1.3, 36, 0x7ee5ff);
 
-  // ---- WIREFRAME DANCER ----
-  // A being made of glowing wire edges rather than solid surfaces. It is
-  // suggestive of a person but incomplete — you can see through it. Lights
-  // on its joints emit continuous tiny "fireworks" of particles while it
-  // dances. Rotation breathes (speeds up / slows down) in a wind-up-toy
-  // rhythm so it feels musical.
+  // Wireframe dancer — moved OFF-CENTER to the west-back corner of the
+  // cooling yard so it's not visible through the narrow north corridor
+  // from spawn. Player hears its music on entry and has to step into the
+  // room and look around to find it. Still tied to the water pickup for
+  // the wind-down.
+  buildWireDancer(-10, 0, 40);
+}
+
+// Construct the wireframe dancer at a given world position, register it
+// as gs.coolingAutomaton so the existing update + wind-down systems
+// continue to operate. Call once per game — the automaton is global.
+function buildWireDancer(cx, cy, cz){
   const automaton = new THREE.Group();
-  automaton.position.set(0, 0, 26);
+  automaton.position.set(cx, cy, cz);
   scene.add(automaton);
 
-  // Build a wireframe LineSegments from a Geometry — standard pattern.
   const wireMat = new THREE.LineBasicMaterial({
     color: 0x7ee5ff, transparent: true, opacity: 0.92
   });
-  // Dim brass base plate (kept solid — otherwise the figure looks unmoored)
   const baseMat = new THREE.MeshStandardMaterial({color:0x3a2a10, metalness:0.9, roughness:0.4,
                    emissive:0x2a1a0a, emissiveIntensity:0.2});
   const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.05, 0.12, 24), baseMat);
   base.position.y = 0.06; automaton.add(base);
-  // Wireframe halo ring on the base
   const baseRingEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(0.82, 0.018, 6, 32));
   const baseRing = new THREE.LineSegments(baseRingEdges, wireMat.clone());
   baseRing.material.color.setHex(0xffe0a0); baseRing.material.opacity = 0.9;
   baseRing.rotation.x = Math.PI/2; baseRing.position.y = 0.13;
   automaton.add(baseRing);
 
-  // Turntable — spins as a unit
   const turntable = new THREE.Group();
   turntable.position.y = 0.12;
   automaton.add(turntable);
 
-  // SOLID SILHOUETTE — a dim interior skeleton that's visible even when
-  // the room goes fully dark. Prevents the "floating orbs" look during
-  // wind-down: the bright nodes always sit on a visible body, not in void.
-  // Uses MeshBasicMaterial so it's unaffected by scene lighting.
   const silMats = [];
   const silhouetteMat = new THREE.MeshBasicMaterial({
     color: 0x14202c, transparent: true, opacity: 0.72
   });
   silMats.push(silhouetteMat);
-  // Solid tapered torso core — sits INSIDE the wireframe cage so the cage
-  // still reads. Slightly thinner so the wire cage is visible around it.
   const silTorso = new THREE.Mesh(
     new THREE.CylinderGeometry(0.26, 0.38, 1.55, 10), silhouetteMat);
   silTorso.position.y = 0.9; turntable.add(silTorso);
-  // Solid head core — slightly smaller than the wire headCage so rims show.
   const silHead = new THREE.Mesh(
     new THREE.SphereGeometry(0.23, 12, 9), silhouetteMat);
   silHead.position.y = 1.98; turntable.add(silHead);
-  // Solid neck stub — ties head to body so they don't look disjointed
   const silNeck = new THREE.Mesh(
     new THREE.CylinderGeometry(0.1, 0.14, 0.2, 8), silhouetteMat);
   silNeck.position.y = 1.78; turntable.add(silNeck);
 
-  // Body wireframe — tall cage cylinder built from EdgesGeometry
   const bodyEdges = new THREE.EdgesGeometry(new THREE.CylinderGeometry(0.32, 0.45, 1.6, 14, 4));
   const body = new THREE.LineSegments(bodyEdges, wireMat.clone());
   body.position.y = 0.9; turntable.add(body);
-  // Three horizontal rib rings at different heights
   const ribMats = [];
   for(const [by, r] of [[0.3, 0.45],[0.95, 0.38],[1.55, 0.3]]){
     const ribEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(r, 0.015, 6, 22));
@@ -4346,11 +4338,9 @@ function decorateCooling(){
     rib.rotation.x = Math.PI/2; rib.position.y = by; turntable.add(rib);
     ribMats.push(rib.material);
   }
-  // Glowing solid heart core inside the cage (the one non-wireframe interior detail)
   const heartMat = new THREE.MeshBasicMaterial({color:0xcbf5ff});
   const heart = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 10), heartMat);
   heart.position.y = 0.95; turntable.add(heart);
-  // Outward-radiating wire spokes from the heart (a star inside the cage)
   for(let i=0;i<6;i++){
     const ang = (i/6) * Math.PI * 2;
     const spokeGeo = new THREE.BufferGeometry();
@@ -4363,22 +4353,17 @@ function decorateCooling(){
     turntable.add(spoke);
   }
 
-  // Arms — wireframe bones + dim solid bones behind them (so the hand and
-  // elbow orbs look like they're mounted on something when the lights die).
   const arms = [];
   for(const side of [-1, 1]){
     const armGroup = new THREE.Group();
     armGroup.position.set(side * 0.32, 1.55, 0);
     turntable.add(armGroup);
-    // --- Solid dim bones (silhouette) ---
-    // Upper arm bone
     const upperLen = 0.55;
     const silUpper = new THREE.Mesh(
       new THREE.CylinderGeometry(0.045, 0.05, upperLen, 8), silhouetteMat);
     silUpper.position.set(side * upperLen/2, 0, 0);
     silUpper.rotation.z = Math.PI/2;
     armGroup.add(silUpper);
-    // Forearm bone
     const foreDx = 0.43, foreDy = 0.18;
     const foreLen = Math.hypot(foreDx, foreDy);
     const silFore = new THREE.Mesh(
@@ -4386,19 +4371,15 @@ function decorateCooling(){
     silFore.position.set(side * (upperLen + foreDx/2), foreDy/2, 0);
     silFore.rotation.z = Math.PI/2 - Math.atan2(foreDy, foreDx) * side;
     armGroup.add(silFore);
-    // Solid elbow mount
     const silElbow = new THREE.Mesh(
       new THREE.SphereGeometry(0.075, 10, 8), silhouetteMat);
     silElbow.position.set(side * upperLen, 0, 0);
     armGroup.add(silElbow);
-    // Solid hand mount (behind the glowing hand orb)
     const silHand = new THREE.Mesh(
       new THREE.SphereGeometry(0.065, 10, 8), silhouetteMat);
     silHand.position.set(side * 0.98, 0.18, 0);
     armGroup.add(silHand);
 
-    // --- Wireframe overlays ---
-    // Upper arm bone — a single line with endcap dots
     const upperGeo = new THREE.BufferGeometry();
     upperGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
       0, 0, 0,
@@ -4406,13 +4387,11 @@ function decorateCooling(){
     ]), 3));
     const upper = new THREE.LineSegments(upperGeo, wireMat.clone());
     armGroup.add(upper);
-    // Elbow cage — small icosahedron wireframe
     const elbowEdges = new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(0.09, 0));
     const elbow = new THREE.LineSegments(elbowEdges, wireMat.clone());
     elbow.material.color.setHex(0xcbf5ff);
     elbow.position.set(side * 0.55, 0, 0);
     armGroup.add(elbow);
-    // Forearm — raised slightly upward
     const foreGeo = new THREE.BufferGeometry();
     foreGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
       side * 0.55, 0, 0,
@@ -4420,7 +4399,6 @@ function decorateCooling(){
     ]), 3));
     const fore = new THREE.LineSegments(foreGeo, wireMat.clone());
     armGroup.add(fore);
-    // Hand — small bright solid node (particle emitter anchor)
     const hand = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8),
       new THREE.MeshBasicMaterial({color:0x7ee5ff}));
     hand.position.set(side * 0.98, 0.18, 0);
@@ -4428,11 +4406,9 @@ function decorateCooling(){
     arms.push({ group:armGroup, hand });
   }
 
-  // Head — wireframe sphere cage
   const headEdges = new THREE.EdgesGeometry(new THREE.SphereGeometry(0.28, 10, 8));
   const headCore = new THREE.LineSegments(headEdges, wireMat.clone());
   headCore.position.y = 1.98; turntable.add(headCore);
-  // Inside the head: two bright eye orbs (solid dots) so the face reads
   const eyeMats = [];
   const eyes = [];
   for(const side of [-1, 1]){
@@ -4443,25 +4419,21 @@ function decorateCooling(){
     eyes.push(eye);
     eyeMats.push(eye.material);
   }
-  // Forehead jewel — bright octahedron
   const jewelMat = new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.95});
   const jewel = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), jewelMat);
   jewel.position.set(0, 2.11, 0.22);
   turntable.add(jewel);
-  // Mouth — small bright line
   const mouthMat = new THREE.MeshBasicMaterial({color:0xffd090});
   const mouth = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.016), mouthMat);
   mouth.position.set(0, 1.85, 0.24);
   turntable.add(mouth);
 
-  // Crown halo — wireframe torus
   const haloEdges = new THREE.EdgesGeometry(new THREE.TorusGeometry(0.32, 0.025, 6, 30));
   const halo = new THREE.LineSegments(haloEdges, wireMat.clone());
   halo.material.color.setHex(0x7ee5ff);
   halo.rotation.x = Math.PI/2; halo.position.y = 2.3;
   turntable.add(halo);
 
-  // Lights
   const automatonLight = new THREE.PointLight(0x9de8ff, 3.4, 11);
   automatonLight.position.set(0, 1.3, 0);
   automaton.add(automatonLight);
@@ -4469,23 +4441,16 @@ function decorateCooling(){
   rimLight.position.set(0, 0.3, 0);
   automaton.add(rimLight);
 
-  // Collision cylinder
-  gs.walls.push({minX:-0.95, maxX:0.95, minZ:25.05, maxZ:26.95});
+  // Collision cylinder at the world position
+  gs.walls.push({minX:cx-0.95, maxX:cx+0.95, minZ:cz-0.95, maxZ:cz+0.95});
 
-  // Collect every wire material we spawned so wind-down can dim them all
   const wireMats = [];
   turntable.traverse(o => {
     if(o.material && (o.isLine || o.isLineSegments)){
       wireMats.push(o.material);
     }
   });
-  // Also include baseRing + halo + body ribs + spokes (already in traverse)
 
-  // Particle emit anchor points: hands, jewel, heart, elbows, halo top.
-  // updateCoolingAutomaton dispatches sparks from these at a rate tied to
-  // the current rotation speed — the faster it spins, the more the body
-  // seems to be blowing fireworks. World positions are computed at
-  // emit time so they follow the turntable.
   gs.coolingAutomaton = {
     group: automaton,
     turntable, arms, heart, halo, jewel, headCore, eyes, mouth,
@@ -4499,21 +4464,18 @@ function decorateCooling(){
     wireMats,
     silMats,
     eyeMats,
-    // Hands handled separately from the rest of the solid glows — they
-    // should flicker AND drift toward dark grey during wind-down rather
-    // than linger as dim blue nodes.
     handMats: [arms[0].hand.material, arms[1].hand.material],
     solidMats: [heartMat, jewelMat, mouthMat],
     emitterLocals: [
-      { x: 0, y: 0.95, z: 0 },                 // heart
-      { x: 0, y: 2.11, z: 0.22 },              // jewel
-      { x: 0, y: 1.85, z: 0.24 },              // mouth
-      { x: -0.98, y: 1.73, z: 0 },             // left hand (arm local x * 1)
-      { x:  0.98, y: 1.73, z: 0 },             // right hand
-      { x: -0.55, y: 1.55, z: 0 },             // left elbow
-      { x:  0.55, y: 1.55, z: 0 },             // right elbow
-      { x: 0, y: 2.3, z: 0.32 },               // halo front
-      { x: 0, y: 2.3, z: -0.32 },              // halo back
+      { x: 0, y: 0.95, z: 0 },
+      { x: 0, y: 2.11, z: 0.22 },
+      { x: 0, y: 1.85, z: 0.24 },
+      { x: -0.98, y: 1.73, z: 0 },
+      { x:  0.98, y: 1.73, z: 0 },
+      { x: -0.55, y: 1.55, z: 0 },
+      { x:  0.55, y: 1.55, z: 0 },
+      { x: 0, y: 2.3, z: 0.32 },
+      { x: 0, y: 2.3, z: -0.32 },
     ]
   };
 }
@@ -6221,18 +6183,15 @@ function spawnMuzzleFlash(x,y,z,color,intensity){
    ===================================================== */
 function createPlayer(){
   const p = {
-    // Spawn on the WEST side of the lobby facing EAST. From here:
-    //  - Front (east) looks straight through Corr E into Building A /
-    //    Server Hall A — the catwalk room. Red-eyed bots are visible in
-    //    the distance walking among the racks.
-    //  - Left (north) opens into Corr N toward the cooling yard with
-    //    the wireframe dancer.
-    //  - Right (south) has the reception desk at z=-8 and OLAM signage
-    //    on the south wall.
-    //  - Back (west) is the corridor toward the substation.
-    pos: new THREE.Vector3(-8, 0, 0),
+    // Spawn near the south entrance at z=-10.5, in front of the reception
+    // desk (z=-8). Player looks NORTH (+z) through the lobby with the
+    // OLAM cover signage on the south wall directly behind them. Through
+    // the north corridor they see into Cooling Yard where red-eyed bots
+    // wander around. The wireframe dancer lives elsewhere (Substation)
+    // so it isn't visible from this spawn — you have to go find it.
+    pos: new THREE.Vector3(0, 0, -10.5),
     vel: new THREE.Vector3(),
-    yaw: Math.PI / 2,   // forward = +x (east) → staring down the catwalk hallway
+    yaw: Math.PI,    // forward = +z → facing into the lobby
     pitch: 0,
     onGround: true,
     hp: MAX_HP,
@@ -7326,10 +7285,10 @@ function updateRoomTracking(){
       gs.network.litRooms[destForCorridor] = true;
     }
   }
-  // Lobby lights up once the player steps off the west entrance plate
-  // and commits into the room. Spawn is at x=-8 facing east; threshold
-  // x>-5 fires as soon as they step forward across the reception line.
-  if(roomNow === 'Lobby' && gs.player.pos.x > -5 &&
+  // Lobby lights up only once the player walks NORTH past the reception
+  // desk (desk sits at z=-8 running x=-4..4; spawn is behind it at z=-10.5).
+  // Threshold z>-7 fires the moment the player steps around the desk.
+  if(roomNow === 'Lobby' && gs.player.pos.z > -7 &&
      gs.network.litRooms && !gs.network.litRooms['Lobby']){
     gs.network.litRooms['Lobby'] = true;
   }
@@ -7546,23 +7505,24 @@ function drawMinimap(){
    SPAWNS
    ===================================================== */
 function spawnInitialEnemies(){
-  // Server Hall A (the catwalk room): drones removed — they flew
-  // around at mid-height and were too sneaky to spot from the catwalk.
-  // The bots + turrets carry the ground-floor combat.
-  // The FIRST bot is positioned near the west entrance of Server Hall A
-  // so it's visible through Corr E from the player's spawn point. Its
-  // idle wander (radius ~0.3) gives the "robot with red eyes walking
-  // around in the background" tableau on load-in.
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(28, 0, 0)));
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(42, 0, 3)));
-  spawnTurret(34, 10);    // server hall (moved slightly so it's not on top of bot)
+  // Server Hall A (the catwalk room): one ground-level bot + a pair of
+  // turrets on either end of the catwalk. Drones were dropped — the
+  // flying mid-height silhouettes were hard to track from the walkway.
+  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(38, 0, 0)));
+  spawnTurret(30, 10);    // server hall
   spawnTurret(52, -10);   // server hall
-  // Substation is EMPTY at spawn. The diesel pickup is what triggers every
-  // encounter in that room — no pre-placed bots, drones, or turrets here.
-  gs.enemies.push(new Enemy('drone', new THREE.Vector3(-6, 2, 38)));
-  gs.enemies.push(new Enemy('drone', new THREE.Vector3(6, 2, 40)));
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(0, 0, 44)));
-  spawnTurret(0, 46);     // cooling
+  // Substation is EMPTY at spawn. The diesel pickup triggers every
+  // encounter in that room — keeps the room feeling safe on walk-in,
+  // then the trap brings the horror.
+  // Cooling Yard — red-eyed bots positioned near the front of the room so
+  // they're clearly visible from the player's spawn through the narrow
+  // Corr N doorway. One bot dead-center at z=28 (just past the corridor
+  // mouth) is the "red eyes walking around in the background" tableau on
+  // load-in. A second bot further in gives the sense of patrol.
+  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(0, 0, 28)));
+  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(3, 0, 36)));
+  gs.enemies.push(new Enemy('drone', new THREE.Vector3(-4, 2, 42)));
+  spawnTurret(7, 44);     // cooling (off-center so bots have room to wander)
   // (Community Development enemies removed — room is cut from this build.)
 }
 
