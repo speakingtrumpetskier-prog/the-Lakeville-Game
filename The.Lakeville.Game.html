@@ -1567,7 +1567,7 @@ function buildLevel(){
   }
 
   // Rooms
-  addRoom('Lobby', 0,0, 24,24, 6.6);   // tall lobby so the chandelier has room to hang
+  addRoom('Lobby', 0,0, 24,24, 9.0);   // cathedral-tall lobby for the chandelier
   addRoom('Server Hall A', 40,0, 32,26, 6.0);
   addRoom('Substation', -40,0, 28,22);
   addRoom('Cooling Tower 03', 0,34, 28,28);
@@ -1581,28 +1581,37 @@ function buildLevel(){
   // Lobby walls with gaps toward corridors. South wall is SEALED — the
   // Community Development corridor is cut in this build, so the lobby
   // south wall is now solid (OLAM signage hangs on it from the inside).
-  // Walls are 6.6m tall to match the raised lobby ceiling so the
+  // Walls are 9m tall to match the raised lobby ceiling so the
   // skybox isn't visible above the wall tops.
-  addWallWithGap('x', 12, -12, 12, 0, 6, 6.6);    // north wall: gap → Corr N
-  addWall(-12, -12, 12, -12, 6.6);                // south wall: SEALED
-  addWallWithGap('z', 12, -12, 12, 0, 6, 6.6);    // east wall:  gap → Corr E
-  addWallWithGap('z', -12, -12, 12, 0, 6, 6.6);   // west wall:  gap → Corr W
+  addWallWithGap('x', 12, -12, 12, 0, 6, 9.0);    // north wall: gap → Corr N
+  addWall(-12, -12, 12, -12, 9.0);                // south wall: SEALED
+  addWallWithGap('z', 12, -12, 12, 0, 6, 9.0);    // east wall:  gap → Corr E
+  addWallWithGap('z', -12, -12, 12, 0, 6, 9.0);   // west wall:  gap → Corr W
   // Lintels above each lobby corridor doorway — seal the vertical gap
   // between the (shorter) corridor ceiling and the raised lobby
   // ceiling. Without these you'd see a strip of void above each
   // corridor opening when looking through the doorway from the lobby.
+  //
+  // Z-fighting fix: each lintel's y range is STRICTLY between the
+  // corridor ceiling mesh's top (ceilY + 0.1) and the lobby ceiling
+  // mesh's bottom (9.0 - 0.1 = 8.9). Previous pass had lintels
+  // flush with the corridor ceiling center plane, which caused the
+  // ceiling to flicker through the lintel base on the west hallway.
   const lobbyLintelMat = new THREE.MeshStandardMaterial({
     color:0x1a2520, roughness:0.7, metalness:0.25
   });
-  // Corr N (corridor ceiling 4.4) — lintel spans 4.4..6.6 = 2.2m tall
-  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(6, 2.2, 0.3), lobbyLintelMat);
-  lintelN.position.set(0, 5.5, 12); scene.add(lintelN);
-  // Corr W (corridor ceiling 4.4) — same 2.2m tall
-  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.2, 6), lobbyLintelMat);
-  lintelW.position.set(-12, 5.5, 0); scene.add(lintelW);
-  // Corr E (corridor ceiling 6.0) — smaller 0.6m tall
-  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.6, 6), lobbyLintelMat);
-  lintelE.position.set(12, 6.3, 0); scene.add(lintelE);
+  // Corr N — corridor ceiling 4.4 (top at 4.5). Lintel y = 4.5..8.9.
+  const lintelNh = 4.4, lintelNy = 4.5 + lintelNh / 2;
+  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(6, lintelNh, 0.3), lobbyLintelMat);
+  lintelN.position.set(0, lintelNy, 12); scene.add(lintelN);
+  // Corr W — corridor ceiling 4.4 (top at 4.5). Same 4.4m tall.
+  const lintelWh = 4.4, lintelWy = 4.5 + lintelWh / 2;
+  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.3, lintelWh, 6), lobbyLintelMat);
+  lintelW.position.set(-12, lintelWy, 0); scene.add(lintelW);
+  // Corr E — corridor ceiling 6.0 (top at 6.1). Shorter lintel.
+  const lintelEh = 2.8, lintelEy = 6.1 + lintelEh / 2;
+  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.3, lintelEh, 6), lobbyLintelMat);
+  lintelE.position.set(12, lintelEy, 0); scene.add(lintelE);
 
   // Server hall (taller — accommodates the catwalk and head clearance)
   addWallWithGap('z', 24, -13, 13, 0, 6, 6.0);
@@ -2926,12 +2935,12 @@ function decorateLobby(){
   gs.dualSigns = { cover:[logo, sub], truth:[truthLogo, truthSub] };
   addPlant(-8, 0, -8);
   addPlant(8, 0, -8);
-  // Lobby ceiling is raised to 6.6 for the chandelier — push the
-  // ambient ceiling lights up to match so their cones still start
-  // at the ceiling mesh, and widen their range a bit.
-  addCeilLight(0, 6.4, 0, 0xbfe6c6, 1.2, 28);
-  addCeilLight(-8, 6.4, 6, 0x8ee39c, 0.6, 14);
-  addCeilLight(8, 6.4, 6, 0x8ee39c, 0.6, 14);
+  // Cathedral lobby (9m ceiling) — ambient ceiling lights sit just
+  // under the ceiling mesh and use a much longer range so the room
+  // still reads as lit all the way down to the floor.
+  addCeilLight(0, 8.7, 0, 0xbfe6c6, 1.2, 36);
+  addCeilLight(-8, 8.7, 6, 0x8ee39c, 0.6, 20);
+  addCeilLight(8, 8.7, 6, 0x8ee39c, 0.6, 20);
   decorateLobbyCenterpiece();
 }
 
@@ -2949,7 +2958,7 @@ function decorateLobbyCenterpiece(){
   // across the floor. The floor inlay is the marble disc AROUND that
   // hub; the tree branches emerge from under it.
   const cx = 0, cz = 0;
-  const ceilY = 6.5;        // matches the raised lobby ceiling
+  const ceilY = 8.9;        // matches the cathedral lobby ceiling (9.0 - 0.1)
 
   // ---- POLISHED FLOOR INLAY ----
   // A black-marble disc with brass mandala etching sits flush with the
@@ -7685,8 +7694,8 @@ function ceilingAt(x, z){
   if(z < -43) return 999;
   // Building A has a taller ceiling to accommodate the catwalk
   if(x >= 24 && x <= 56 && z >= -13 && z <= 13) return 6.0;
-  // Lobby is tall — chandelier hangs from ~6.5, room is cathedral-like
-  if(x >= -12 && x <= 12 && z >= -12 && z <= 12) return 6.5;
+  // Lobby is a cathedral — 9m ceiling (mesh bottom at 8.9)
+  if(x >= -12 && x <= 12 && z >= -12 && z <= 12) return 8.9;
   return 4.3; // interior default (ceiling mesh bottom)
 }
 
