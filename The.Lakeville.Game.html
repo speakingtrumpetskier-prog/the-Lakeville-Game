@@ -5076,27 +5076,305 @@ function decorateOffice(){
   addEvidencePickup('subsidy', 0, 1.25, -30, 0xffd28c);
 }
 function decorateFilingRoom(){
-  const cabMat = new THREE.MeshStandardMaterial({color:0x555b52, metalness:0.6, roughness:0.5});
-  [[-5,56],[-5,60],[-5,64],[5,56],[5,60],[5,64]].forEach(([x,z])=>{
-    const c = new THREE.Mesh(new THREE.BoxGeometry(1.6,2.4,0.8), cabMat);
-    c.position.set(x, 1.2, z); scene.add(c);
-    gs.walls.push({minX:x-0.8, maxX:x+0.8, minZ:z-0.4, maxZ:z+0.4});
-  });
-  const table = new THREE.Mesh(new THREE.BoxGeometry(3,1.0,2),
-    new THREE.MeshStandardMaterial({color:0x2a1a12, roughness:0.8}));
-  table.position.set(0, 0.5, 62); scene.add(table);
-  gs.walls.push({minX:-1.5, maxX:1.5, minZ:61, maxZ:63});
-  const caseMesh = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.3, 1.1),
-    new THREE.MeshStandardMaterial({color:0x0a0a0a, roughness:0.6}));
-  caseMesh.position.set(0, 1.15, 62); scene.add(caseMesh);
-  const glow = new THREE.PointLight(0x8ee39c, 1.6, 10);
-  glow.position.set(0, 2, 62); scene.add(glow);
-  const s = makeSignMesh('ADMIN. RECORD — DEPOSIT', 0x8ee39c);
-  s.position.set(0, 3.0, 66.8); s.rotation.y=Math.PI; scene.add(s);
-  addCeilLight(0,4.2,60, 0xbfe6c6, 0.8, 14);
+  // Room spans x=-7..7, z=53..67. The deposit beat is the game's final
+  // climax, so the space is dressed as a small ceremonial courtroom:
+  //   - Dais + judge's bench at the north end (z~64.5–66)
+  //   - MCEA seal + flags on the back wall above the bench
+  //   - Podium for depositing evidence, center of the room (z~61.5)
+  //   - Gallery pews facing north (z=58 and z=55.5)
+  //   - Marble columns at the four corners
+  //   - Hanging brass chandelier above the podium
+  //   - Warm tungsten ceiling + accent lights
+  // Filing cabinets are tucked along the side walls behind the columns
+  // so the room still reads as a records annex.
 
+  const darkWoodMat = new THREE.MeshStandardMaterial({
+    color:0x2a180c, metalness:0.05, roughness:0.72
+  });
+  const medWoodMat  = new THREE.MeshStandardMaterial({
+    color:0x4a2a16, metalness:0.05, roughness:0.62
+  });
+  const goldMat     = new THREE.MeshStandardMaterial({
+    color:0xc49a44, metalness:0.85, roughness:0.28,
+    emissive:0x4a3410, emissiveIntensity:0.22
+  });
+  const marbleMat   = new THREE.MeshStandardMaterial({
+    color:0xa39a88, metalness:0.1, roughness:0.38,
+    emissive:0x1a1710, emissiveIntensity:0.08
+  });
+  const pewMat      = new THREE.MeshStandardMaterial({
+    color:0x3a1e10, metalness:0.05, roughness:0.78
+  });
+  const cabMat      = new THREE.MeshStandardMaterial({
+    color:0x403730, metalness:0.5, roughness:0.55
+  });
+
+  // ---- JUDGE'S DAIS + BENCH (north end) ----
+  // Two-step dais so the bench sits raised above the floor.
+  const dais = new THREE.Mesh(new THREE.BoxGeometry(9.2, 0.22, 2.4), darkWoodMat);
+  dais.position.set(0, 0.11, 64.6); scene.add(dais);
+  // Upper step
+  const daisTop = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.22, 1.8), darkWoodMat);
+  daisTop.position.set(0, 0.33, 64.9); scene.add(daisTop);
+  gs.walls.push({minX:-4.6, maxX:4.6, minZ:63.4, maxZ:65.8});
+
+  // Bench front (carved panel) — dark wood with two gold bands
+  const benchFront = new THREE.Mesh(new THREE.BoxGeometry(6.8, 1.2, 0.16), medWoodMat);
+  benchFront.position.set(0, 1.04, 64.4); scene.add(benchFront);
+  // Gold trim on bench front
+  for(const by of [0.55, 1.55]){
+    const trim = new THREE.Mesh(new THREE.BoxGeometry(6.9, 0.06, 0.03), goldMat);
+    trim.position.set(0, by, 64.32); scene.add(trim);
+  }
+  // Carved recessed panels on bench front
+  for(const px of [-2, 0, 2]){
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.7, 0.04),
+      new THREE.MeshStandardMaterial({color:0x1a0a04, roughness:0.85, metalness:0.05}));
+    panel.position.set(px, 1.04, 64.33); scene.add(panel);
+  }
+  // Writing surface / desk top
+  const benchTop = new THREE.Mesh(new THREE.BoxGeometry(7.0, 0.14, 1.5), medWoodMat);
+  benchTop.position.set(0, 1.71, 65.15); scene.add(benchTop);
+  // Side cheeks enclosing the judge's position
+  for(const sx of [-3.4, 3.4]){
+    const cheek = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.4, 1.5), darkWoodMat);
+    cheek.position.set(sx, 0.98, 65.15); scene.add(cheek);
+  }
+
+  // Gavel on the bench
+  const gavelHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.35, 8), medWoodMat);
+  gavelHandle.position.set(1.4, 1.82, 65.1); gavelHandle.rotation.z = Math.PI/2.3;
+  scene.add(gavelHandle);
+  const gavelHead = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.22, 12), medWoodMat);
+  gavelHead.position.set(1.62, 1.88, 65.05); gavelHead.rotation.z = Math.PI/2;
+  scene.add(gavelHead);
+  // Gavel gold band
+  const gBand = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.01, 6, 16), goldMat);
+  gBand.position.set(1.62, 1.88, 65.05); gBand.rotation.y = Math.PI/2;
+  scene.add(gBand);
+
+  // Small desk lamp on the bench
+  const lampBase = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.04, 12), goldMat);
+  lampBase.position.set(-1.8, 1.80, 65.05); scene.add(lampBase);
+  const lampArm = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.4, 8), goldMat);
+  lampArm.position.set(-1.8, 2.0, 65.05); scene.add(lampArm);
+  const lampShade = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.2, 10, 1, true),
+    new THREE.MeshStandardMaterial({color:0x3a8050, roughness:0.5, side:THREE.DoubleSide,
+      emissive:0x1a4020, emissiveIntensity:0.5}));
+  lampShade.position.set(-1.8, 2.22, 65.05); scene.add(lampShade);
+
+  // ---- BACK WALL SEAL + FLAGS ----
+  // Circular MCEA seal centered above the bench
+  const sealOuter = new THREE.Mesh(
+    new THREE.RingGeometry(0.92, 1.05, 48), goldMat);
+  sealOuter.position.set(0, 3.1, 66.82);
+  sealOuter.rotation.y = Math.PI;
+  scene.add(sealOuter);
+  const sealInner = new THREE.Mesh(
+    new THREE.CircleGeometry(0.92, 32),
+    new THREE.MeshStandardMaterial({
+      color:0x1a2a18, roughness:0.35, metalness:0.5,
+      emissive:0x0a1a08, emissiveIntensity:0.4
+    })
+  );
+  sealInner.position.set(0, 3.1, 66.81);
+  sealInner.rotation.y = Math.PI;
+  scene.add(sealInner);
+  // MCEA lettering on seal
+  const sealLabel = makeSignMesh('MCEA', 0xc49a44);
+  sealLabel.position.set(0, 3.1, 66.79);
+  sealLabel.rotation.y = Math.PI;
+  sealLabel.scale.set(0.22, 0.22, 0.22);
+  scene.add(sealLabel);
+  // Sub-seal small text — "ENV. COURT"
+  const sealSub = makeSignMesh('ENV. COURT', 0xc49a44);
+  sealSub.position.set(0, 2.7, 66.79);
+  sealSub.rotation.y = Math.PI;
+  sealSub.scale.set(0.12, 0.12, 0.12);
+  scene.add(sealSub);
+
+  // Flags flanking the seal (MN state blue + US red — stylized)
+  for(const fx of [-2.4, 2.4]){
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 3.6, 8), goldMat);
+    pole.position.set(fx, 2.3, 66.45); scene.add(pole);
+    const finial = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 10), goldMat);
+    finial.position.set(fx, 4.08, 66.45); scene.add(finial);
+    // Flag draped at an angle
+    const flagColor = fx < 0 ? 0x23417a : 0x8a2a2a;
+    const flagMat = new THREE.MeshStandardMaterial({
+      color: flagColor, roughness: 0.88, metalness: 0.0, side: THREE.DoubleSide
+    });
+    const flag = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.7), flagMat);
+    flag.position.set(fx + (fx < 0 ? 0.55 : -0.55), 3.4, 66.5);
+    scene.add(flag);
+    // Tiny gold strip at the flag top
+    const flagTop = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.04, 0.02), goldMat);
+    flagTop.position.set(fx + (fx < 0 ? 0.55 : -0.55), 3.73, 66.5);
+    scene.add(flagTop);
+  }
+
+  // ---- DEPOSIT PODIUM (center) ----
+  // Octagonal marble base with a wood top — this is where evidence is
+  // filed. Illuminated from above by the chandelier.
+  const podiumBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.75, 1.0, 8), marbleMat);
+  podiumBase.position.set(0, 0.5, 61.5); scene.add(podiumBase);
+  const podiumCap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.65, 0.58, 0.1, 8), darkWoodMat);
+  podiumCap.position.set(0, 1.05, 61.5); scene.add(podiumCap);
+  // Angled reading surface on top
+  const podiumSlant = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.06, 0.7), medWoodMat);
+  podiumSlant.position.set(0, 1.16, 61.5);
+  podiumSlant.rotation.x = -0.25;   // tilts toward the judge
+  scene.add(podiumSlant);
+  // Gold edge on the slant
+  const podiumTrim = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.03, 0.04), goldMat);
+  podiumTrim.position.set(0, 1.16, 61.15);
+  podiumTrim.rotation.x = -0.25;
+  scene.add(podiumTrim);
+  gs.walls.push({minX:-0.75, maxX:0.75, minZ:60.75, maxZ:62.25});
+  // Downlight glow above podium
+  const depositGlow = new THREE.PointLight(0xfff0c0, 1.6, 8);
+  depositGlow.position.set(0, 3.0, 61.5);
+  scene.add(depositGlow);
+  // Gold halo ring below the glow (visible hanging marker)
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.45, 0.025, 8, 28), goldMat);
+  halo.position.set(0, 2.7, 61.5);
+  halo.rotation.x = Math.PI/2;
+  scene.add(halo);
+
+  // ---- GALLERY PEWS (south) ----
+  for(const pz of [58.0, 55.5]){
+    // Seat slab
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.12, 0.55), pewMat);
+    seat.position.set(0, 0.78, pz); scene.add(seat);
+    // Backrest
+    const back = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.0, 0.1), pewMat);
+    back.position.set(0, 1.3, pz + 0.3); scene.add(back);
+    // Backrest top cap
+    const bCap = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.08, 0.15), medWoodMat);
+    bCap.position.set(0, 1.82, pz + 0.3); scene.add(bCap);
+    // End pieces
+    for(const sx of [-2.55, 2.55]){
+      const endcap = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.5, 0.7), pewMat);
+      endcap.position.set(sx, 1.1, pz + 0.1); scene.add(endcap);
+    }
+    // Collision box covering seat + backrest
+    gs.walls.push({minX:-2.7, maxX:2.7, minZ: pz - 0.3, maxZ: pz + 0.5});
+  }
+
+  // ---- MARBLE COLUMNS (four corners) ----
+  for(const cx of [-6.3, 6.3]){
+    for(const cz of [54.2, 65.8]){
+      // Base
+      const colBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.38, 0.44, 0.25, 8), marbleMat);
+      colBase.position.set(cx, 0.125, cz); scene.add(colBase);
+      // Plinth
+      const plinth = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.15, 0.85), marbleMat);
+      plinth.position.set(cx, 0.3, cz); scene.add(plinth);
+      // Shaft
+      const shaft = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.3, 0.32, 3.4, 14), marbleMat);
+      shaft.position.set(cx, 2.08, cz); scene.add(shaft);
+      // Fluting suggestion — vertical thin line
+      const fluteMat = new THREE.MeshStandardMaterial({
+        color:0x706754, metalness:0.15, roughness:0.4, transparent:true, opacity:0.55
+      });
+      for(let f=0; f<4; f++){
+        const fAng = f * (Math.PI/2) + Math.PI/4;
+        const flute = new THREE.Mesh(
+          new THREE.BoxGeometry(0.02, 3.2, 0.02), fluteMat);
+        flute.position.set(cx + Math.cos(fAng)*0.31, 2.08, cz + Math.sin(fAng)*0.31);
+        scene.add(flute);
+      }
+      // Capital
+      const capital = new THREE.Mesh(new THREE.BoxGeometry(0.82, 0.28, 0.82), marbleMat);
+      capital.position.set(cx, 3.92, cz); scene.add(capital);
+      // Gold ring at neck
+      const neckRing = new THREE.Mesh(
+        new THREE.TorusGeometry(0.32, 0.025, 6, 18), goldMat);
+      neckRing.position.set(cx, 3.75, cz); neckRing.rotation.x = Math.PI/2;
+      scene.add(neckRing);
+      gs.walls.push({minX:cx-0.42, maxX:cx+0.42, minZ:cz-0.42, maxZ:cz+0.42});
+    }
+  }
+
+  // ---- HANGING BRASS CHANDELIER above the podium ----
+  const chainMat = goldMat;
+  const chandY = 3.6;
+  const chandChain = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.025, 0.025, 0.8, 6), chainMat);
+  chandChain.position.set(0, 4.0, 61.5); scene.add(chandChain);
+  // Outer ring
+  const chandRing = new THREE.Mesh(
+    new THREE.TorusGeometry(0.55, 0.06, 8, 32), goldMat);
+  chandRing.position.set(0, chandY, 61.5);
+  chandRing.rotation.x = Math.PI/2;
+  scene.add(chandRing);
+  // Inner ring
+  const chandRing2 = new THREE.Mesh(
+    new THREE.TorusGeometry(0.28, 0.04, 8, 24), goldMat);
+  chandRing2.position.set(0, chandY - 0.08, 61.5);
+  chandRing2.rotation.x = Math.PI/2;
+  scene.add(chandRing2);
+  // Crossbeams
+  for(let i = 0; i < 4; i++){
+    const ang = i * Math.PI/2;
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.02, 0.02, 0.55, 6), goldMat);
+    beam.position.set(Math.cos(ang)*0.3, chandY, 61.5 + Math.sin(ang)*0.3);
+    beam.rotation.z = Math.PI/2;
+    beam.rotation.y = -ang;
+    scene.add(beam);
+  }
+  // Candle-flames around the ring
+  for(let i = 0; i < 8; i++){
+    const ang = (i / 8) * Math.PI * 2;
+    const cx = Math.cos(ang) * 0.55;
+    const cz = 61.5 + Math.sin(ang) * 0.55;
+    // Candle stick
+    const candle = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.025, 0.025, 0.12, 6),
+      new THREE.MeshStandardMaterial({color:0xe8d8a8, roughness:0.7}));
+    candle.position.set(cx, chandY + 0.08, cz); scene.add(candle);
+    // Flame
+    const flame = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 8, 6),
+      new THREE.MeshBasicMaterial({color: 0xffe090}));
+    flame.position.set(cx, chandY + 0.18, cz); scene.add(flame);
+  }
+
+  // ---- FILING CABINETS (archive storage against side walls) ----
+  // Tucked behind the columns so they don't clutter the main space —
+  // still signals this is a records room even dressed as a courtroom.
+  for(const cx of [-6.4, 6.4]){
+    for(const cz of [57.5, 60.5, 63.5]){
+      const cab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2.0, 1.3), cabMat);
+      cab.position.set(cx, 1.0, cz); scene.add(cab);
+      gs.walls.push({minX:cx-0.45, maxX:cx+0.45, minZ:cz-0.65, maxZ:cz+0.65});
+      // Handle/ drawer line (horizontal bar)
+      for(const by of [0.4, 1.0, 1.6]){
+        const handle = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 0.06),
+          new THREE.MeshStandardMaterial({color:0x88857c, metalness:0.9, roughness:0.3}));
+        handle.position.set(cx + (cx < 0 ? 0.45 : -0.45), by, cz);
+        scene.add(handle);
+      }
+    }
+  }
+
+  // ---- LIGHTING ----
+  // Main chandelier-era warm light, centered on the podium
+  addCeilLight(0, 4.2, 61.5, 0xffe0b0, 1.3, 14);
+  // Accent wall-washers — warm glow on the seal wall + gallery area
+  addCeilLight(0, 4.2, 66.0, 0xffd498, 0.9, 8);
+  addCeilLight(-4, 4.2, 56.5, 0xffe0b0, 0.5, 7);
+  addCeilLight( 4, 4.2, 56.5, 0xffe0b0, 0.5, 7);
+
+  // ---- DEPOSIT INTERACTABLE (on the podium) ----
   gs.interactables.push({
-    kind:'file', pos:new THREE.Vector3(0,1.2,62), radius:2.4,
+    kind:'file', pos:new THREE.Vector3(0, 1.16, 61.5), radius:2.2,
     prompt:'File complaint',
     onUse:()=>{
       if(allEvidence() && gs.bossDefeated){
