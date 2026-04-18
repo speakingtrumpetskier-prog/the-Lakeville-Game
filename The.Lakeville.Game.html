@@ -7657,15 +7657,9 @@ function drawMinimap(){
     mapCtx.arc(cx + pu.pos.x*scale, cy - pu.pos.z*scale, 3, 0, Math.PI*2);
     mapCtx.fill();
   }
-  for(const e of gs.enemies){
-    if(!e.alive) continue;
-    if(!visibleOnMap(e.pos.z)) continue;
-    mapCtx.fillStyle = e.type==='boss'?'#ff40c0':'#ff3040';
-    mapCtx.beginPath();
-    mapCtx.arc(cx + e.pos.x*scale, cy - e.pos.z*scale,
-      e.type==='boss'?5:2.5, 0, Math.PI*2);
-    mapCtx.fill();
-  }
+  // Enemy markers removed — the map now shows only the static layout
+  // (walls + active pickups) and the player's triangle. Less tactical
+  // meta-information, more "you are here in an unfamiliar facility."
   mapCtx.save();
   mapCtx.translate(W/2, H/2);
   // Rotation is `yaw + PI`. Derivation: player forward on the minimap is
@@ -7706,9 +7700,13 @@ function spawnInitialEnemies(){
   coolBot.wanderOmega = 0.12;   // slower angular rate → much larger path
   coolBot.wanderAmp   = 0.3;    // keep walking speed modest
   gs.enemies.push(coolBot);
-  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(4, 0, 40)));
-  gs.enemies.push(new Enemy('drone', new THREE.Vector3(-4, 2, 44)));
-  spawnTurret(8, 44);     // cooling (off-center so bots have room to wander)
+  gs.enemies.push(new Enemy('bot',   new THREE.Vector3(3, 0, 38)));
+  // Drone placed between the back row cooling towers (which span
+  // x=-8.4..-3.6 and 3.6..8.4 around z=42). Previous spawn at (-4,2,44)
+  // was INSIDE the back-left tower's collision box, trapping the drone
+  // for life. (0,2,42) sits in the clear gap between the towers.
+  gs.enemies.push(new Enemy('drone', new THREE.Vector3(0, 2, 42)));
+  spawnTurret(8, 46);     // cooling (back-east corner, off the wander lane)
   // (Community Development enemies removed — room is cut from this build.)
 }
 
