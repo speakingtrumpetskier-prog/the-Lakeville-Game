@@ -3674,20 +3674,86 @@ function updateSubstationTrap(dt){
       trap.inspector.keyBadge.rotation.y += dt * 3;
       trap.inspector.keyBadge.position.y = 2.8 + Math.sin(gs.time * 2.2) * 0.18;
     }
-    // Inspector death → sprinklers
+    // Inspector death → 10-second phased resolution (fire → alarm →
+    // sprinklers → flicker → free). Enters 'resolving' state; the
+    // block below drives the timeline.
     if(trap.inspector && !trap.inspector.alive && trap.state === 'active'){
-      triggerSubstationSprinklers();
+      trap.state = 'resolving';
+      trap.resolveStart = gs.time;
+      trap.bossFirePos = new THREE.Vector3(
+        trap.inspector.pos.x, 0.6, trap.inspector.pos.z);
+      // Release music lock — no more forced Substation theme
+      gs._musicOverride = null;
+      // Short initial fire whoosh
+      audio.noise({dur: 1.6, vol: 0.2, lp: 1400, hp: 160});
+      audio.tone({freq: 75, dur: 1.2, type: 'sawtooth', vol: 0.22});
     }
     // Music override: force Substation theme while the ambush is active
     if(gs._musicOverride){
       audio.setRoom(gs._musicOverride);
     }
   }
-  // Sprinkler particle spawn — long tail of falling droplets from the ceiling
-  if(trap.state === 'resolved'){
-    const sinceStart = gs.time - trap.sprinklerStart;
-    if(sinceStart < 6.0){
-      for(let i=0;i<5;i++){
+
+  // Phased resolution sequence:
+  //   0–4s  boss burns (fire + smoke from its final position)
+  //   4–6s  fire alarm: white rotating/blinking wall lights + siren
+  //   6–9s  sprinklers pour water from ceiling
+  //   7–9s  generator flicker + dying (1s after sprinklers start)
+  //   9s+   bars raise, state → 'resolved', player free
+  if(trap.state === 'resolving'){
+    const el = gs.time - trap.resolveStart;
+
+    // Phase 1–2: burning (fire + smoke from the boss's position)
+    if(el < 6.0){
+      if(Math.random() < 0.75){
+        const p = trap.bossFirePos;
+        spawnParticle(
+          p.x + (Math.random()-0.5)*0.7,
+          p.y + Math.random()*0.9,
+          p.z + (Math.random()-0.5)*0.7,
+          (Math.random()-0.5)*1.1,
+          1.3 + Math.random()*1.9,
+          (Math.random()-0.5)*1.1,
+          Math.random() < 0.55 ? 0xff5020 : 0xffc050,
+          0.55 + Math.random()*0.3, 0.11
+        );
+      }
+      if(Math.random() < 0.35){
+        const p = trap.bossFirePos;
+        spawnParticle(
+          p.x + (Math.random()-0.5)*1.0,
+          p.y + 1.3 + Math.random()*0.6,
+          p.z + (Math.random()-0.5)*1.0,
+          (Math.random()-0.5)*0.6,
+          0.35 + Math.random()*0.6,
+          (Math.random()-0.5)*0.6,
+          0x303030,
+          1.8 + Math.random()*0.7, 0.22
+        );
+      }
+    }
+
+    // Phase 2: fire alarm setup at t=4s
+    if(el >= 4.0 && !trap.alarmSetup){
+      trap.alarmSetup = true;
+      _setupSubstationFireAlarm(trap);
+    }
+    if(trap.alarmSetup && !trap.alarmStopped){
+      _updateSubstationFireAlarm(trap, el - 4.0, dt);
+    }
+
+    // Phase 3: sprinklers at t=6s
+    if(el >= 6.0 && !trap.sprinklerSetup){
+      trap.sprinklerSetup = true;
+      trap.sprinklerStart = gs.time;
+      // Kill any remaining hostile ambushers that managed to survive
+      for(const e of trap.enemiesSpawned){ if(e.alive) e.die(); }
+      audio.noise({dur: 3.2, vol: 0.22, lp: 2400, hp: 600});
+      audio.tone({freq: 120, dur: 0.8, type: 'sine', vol: 0.18});
+      shake(0.35);
+    }
+    if(trap.sprinklerSetup && (gs.time - trap.sprinklerStart) < 3.0){
+      for(let i=0;i<6;i++){
         const x = -54 + Math.random()*28;
         const z = -11 + Math.random()*22;
         spawnParticle(x, 4.1, z,
@@ -3695,48 +3761,134 @@ function updateSubstationTrap(dt){
           0x8ad4ff, 0.7, 0.04);
       }
     }
-    // Generator short-circuit animation — first 2.2s of sprinkler release.
-    // Performance-first: no dynamic PointLight creation (that forces WebGL
-    // shader recompilation every frame and chugs hard). The spectacle
-    // comes from the existing genLights pulsing + bright particles +
-    // emissive flicker on the coil materials.
-    const deathT = gs.time - trap.generatorDeathStart;
-    if(deathT < 2.2){
-      const flick = Math.random() < 0.55 ? 1 : 0.15;
-      const fade = 1 - deathT/2.2;
-      trap.coilMats.forEach(m => { m.emissiveIntensity = 1.6 * flick * fade; });
-      // Flash the PRE-EXISTING genLights brighter during spark bursts
-      // instead of allocating new PointLights. Cycle through them.
-      trap.genLights.forEach((l, i) => {
-        const local = Math.random() < 0.6 ? (2.8 + Math.random()*2.5) : 0.3;
-        l.intensity = local * fade;
-      });
-      // One spark burst per frame (not multiple). 3 particles per burst.
-      if(Math.random() < 0.5){
-        const tgt = trap.sparkTargets[Math.floor(Math.random()*trap.sparkTargets.length)];
-        if(tgt){
-          for(let i=0;i<3;i++){
-            spawnParticle(tgt.x + (Math.random()-0.5)*0.7, tgt.y, tgt.z + (Math.random()-0.5)*0.7,
-              (Math.random()-0.5)*4, 1 + Math.random()*2.5, (Math.random()-0.5)*4,
-              Math.random() < 0.5 ? 0xfff0a0 : 0xff7030, 0.22, 0.055);
-          }
-          // Cheap audible tick — throttled so it's not every frame
-          if(Math.random() < 0.35){
-            audio.tone({freq:2200 + Math.random()*1200, dur:0.03, type:'sawtooth', vol:0.06});
+
+    // Phase 4: generator flicker + dying at t=7s (1s after sprinklers)
+    if(el >= 7.0 && !trap.flickerSetup){
+      trap.flickerSetup = true;
+      trap.generatorDeathStart = gs.time;
+    }
+    if(trap.flickerSetup){
+      const deathT = gs.time - trap.generatorDeathStart;
+      if(deathT < 2.0){
+        const flick = Math.random() < 0.55 ? 1 : 0.15;
+        const fade = 1 - deathT / 2.0;
+        trap.coilMats.forEach(m => { m.emissiveIntensity = 1.6 * flick * fade; });
+        trap.genLights.forEach(l => {
+          const local = Math.random() < 0.6 ? (2.8 + Math.random()*2.5) : 0.3;
+          l.intensity = local * fade;
+        });
+        // Ceiling light flickers too
+        if(trap.ceilLight && trap.ceilLight.light){
+          const cFlick = Math.random() < 0.5 ? 0 : (0.3 + Math.random()*0.6);
+          trap.ceilLight.light.intensity = cFlick * fade * 0.6;
+        }
+        // Spark bursts from generator caps
+        if(Math.random() < 0.5){
+          const tgt = trap.sparkTargets[Math.floor(Math.random()*trap.sparkTargets.length)];
+          if(tgt){
+            for(let i=0;i<3;i++){
+              spawnParticle(tgt.x + (Math.random()-0.5)*0.7, tgt.y, tgt.z + (Math.random()-0.5)*0.7,
+                (Math.random()-0.5)*4, 1 + Math.random()*2.5, (Math.random()-0.5)*4,
+                Math.random() < 0.5 ? 0xfff0a0 : 0xff7030, 0.22, 0.055);
+            }
+            if(Math.random() < 0.35){
+              audio.tone({freq: 2200 + Math.random()*1200, dur: 0.03, type: 'sawtooth', vol: 0.06});
+            }
           }
         }
+      } else if(deathT < 2.15 && !trap.generatorsKilled){
+        trap.generatorsKilled = true;
+        trap.coilMats.forEach(m => {
+          m.emissiveIntensity = 0;
+          m.color = new THREE.Color(0x201410);
+        });
+        trap.genLights.forEach(l => { l.intensity = 0; });
+        for(const g of trap.generatorObjs){ g.destroyed = true; }
+        audio.noise({dur: 0.8, vol: 0.18, lp: 1800, hp: 400});
       }
-    } else if(deathT < 2.4 && !trap.generatorsKilled){
-      trap.generatorsKilled = true;
-      // Final extinguish — generators go fully dark
-      trap.coilMats.forEach(m => {
-        m.emissiveIntensity = 0;
-        m.color = new THREE.Color(0x201410);
-      });
-      trap.genLights.forEach(l => { l.intensity = 0; });
-      for(const g of trap.generatorObjs){ g.destroyed = true; }
-      // One last sizzle
-      audio.noise({dur:0.8, vol:0.18, lp:1800, hp:400});
+    }
+
+    // Phase 5: finalize — raise bars, kill alarm, drop to 'resolved'
+    if(el >= 9.0 && trap.state !== 'resolved'){
+      trap.state = 'resolved';
+      for(const b of trap.bars){ b.dropStart = -999; b.raiseStart = gs.time; }
+      const idx = gs.walls.indexOf(trap.barCollider);
+      if(idx >= 0) gs.walls.splice(idx, 1);
+      _endSubstationFireAlarm(trap);
+      if(trap.ceilLight){
+        trap.ceilLight.light.color.setHex(0x6088aa);
+        trap.ceilLight.light.intensity = 0.15;
+        trap.ceilLight.base = 0.15;
+      }
+    }
+  }
+}
+
+// ---- Fire alarm helpers ----
+// Two white rotating beacons mounted on the substation side walls, plus
+// a repeating two-tone siren. Set up once at phase 2 (t=4s), blink
+// during phases 2–4, shut down when the sequence ends.
+function _setupSubstationFireAlarm(trap){
+  trap.alarmLamps = [];
+  // Lamp housings + beacon spheres on the north and south long walls
+  // of the substation (z=±10.5, mid-height y=3.5).
+  const spots = [
+    { x: -40, y: 3.5, z:  10.4, facing: -1 },
+    { x: -40, y: 3.5, z: -10.4, facing:  1 },
+  ];
+  for(const s of spots){
+    const housingMat = new THREE.MeshStandardMaterial({
+      color: 0x1a1a1a, metalness: 0.7, roughness: 0.4
+    });
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.32, 0.18), housingMat);
+    housing.position.set(s.x, s.y, s.z);
+    scene.add(housing);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0x202020 });
+    const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 8), beaconMat);
+    beacon.position.set(s.x, s.y + 0.05, s.z + s.facing * 0.12);
+    scene.add(beacon);
+    const pl = new THREE.PointLight(0xffffff, 0, 10);
+    pl.position.set(s.x, s.y + 0.05, s.z + s.facing * 0.25);
+    scene.add(pl);
+    trap.alarmLamps.push({ housing, beacon, beaconMat, pl, phase: Math.random()*Math.PI*2 });
+  }
+  trap.alarmBeepActive = true;
+  _substationAlarmBeep(trap);
+}
+
+function _substationAlarmBeep(trap){
+  // Two-tone smoke-alarm style: short high beep, short low beep, repeat.
+  if(!trap.alarmBeepActive) return;
+  audio.tone({freq: 2400, dur: 0.18, type: 'square', vol: 0.22});
+  setTimeout(() => {
+    if(!trap.alarmBeepActive) return;
+    audio.tone({freq: 1850, dur: 0.18, type: 'square', vol: 0.22});
+    setTimeout(() => _substationAlarmBeep(trap), 260);
+  }, 230);
+}
+
+function _updateSubstationFireAlarm(trap, elapsed, dt){
+  if(!trap.alarmLamps) return;
+  // Each beacon pulses on a different phase so they feel like rotating
+  // lights sweeping across the wall rather than blinking in sync.
+  for(const a of trap.alarmLamps){
+    const p = elapsed * 6.0 + a.phase;   // ~1Hz rotation (2*pi/6)
+    // cos(p) squared rising from 0 to 1 — gives a sharp "passing beam"
+    const on = Math.max(0, Math.cos(p));
+    const intensity = on * on;           // sharper pulse
+    const v = 0.1 + intensity * 0.9;
+    a.beaconMat.color.setRGB(v, v, v);
+    a.pl.intensity = intensity * 3.2;
+  }
+}
+
+function _endSubstationFireAlarm(trap){
+  trap.alarmStopped = true;
+  trap.alarmBeepActive = false;
+  if(trap.alarmLamps){
+    for(const a of trap.alarmLamps){
+      a.beaconMat.color.setRGB(0.06, 0.06, 0.06);
+      a.pl.intensity = 0;
     }
   }
 }
