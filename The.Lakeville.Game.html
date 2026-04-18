@@ -375,12 +375,12 @@
     <table>
       <tr><td class="key">WASD</td><td class="desc">move</td></tr>
       <tr><td class="key">MOUSE</td><td class="desc">look</td></tr>
-      <tr><td class="key">LMB / SPACE</td><td class="desc">EMP pulse</td></tr>
+      <tr><td class="key">LMB / SHIFT</td><td class="desc">EMP pulse</td></tr>
       <tr><td class="key">RMB (hold)</td><td class="desc">charged burst</td></tr>
       <tr><td class="key">E</td><td class="desc">interact / collect</td></tr>
       <tr><td class="key">F</td><td class="desc">flashlight</td></tr>
-      <tr><td class="key">SHIFT</td><td class="desc">sprint</td></tr>
-      <tr><td class="key">SPACE</td><td class="desc">jump (+ fire)</td></tr>
+      <tr><td class="key">SHIFT</td><td class="desc">sprint (+ fire)</td></tr>
+      <tr><td class="key">SPACE</td><td class="desc">jump</td></tr>
       <tr><td class="key">ESC</td><td class="desc">pause</td></tr>
     </table>
   </div>
@@ -1108,10 +1108,73 @@ class AudioEngine {
     schedule();
   }
   setRoomsVisitedHum(n){
-    // Hum grows with each unique room visited (0 rooms = 0.004 baseline).
     if(!this._humGain) return;
     const target = 0.004 + Math.min(n, 8) * 0.012;
     this._humGain.gain.linearRampToValueAtTime(target, this.now() + 3.0);
+  }
+  musicBoxWindDown(){
+    // Broken-wind-up-toy wind-down. Plays a descending scale whose notes
+    // get progressively slower AND flatter (pitch bending down) AND
+    // quieter. Under it, low filtered noise (dust / felted hammers), and
+    // a tinny final "thunk" at the end. Main theme gain ramps to 0 over
+    // 5 seconds simultaneously.
+    if(!this.ready) return;
+    const tn = this.now();
+    // Fade whatever theme is playing to 0
+    if(this._themeGain){
+      this._themeGain.gain.cancelScheduledValues(tn);
+      this._themeGain.gain.setValueAtTime(this._themeGain.gain.value, tn);
+      this._themeGain.gain.linearRampToValueAtTime(0, tn + 5.0);
+    }
+    // Descending C-major-ish scale with increasingly flat tuning.
+    // Notes: C6 B5 A5 G5 F5 E5 D5 C5 — each gets more detune, more gap,
+    // less volume. Simulates a music box spring running out.
+    const scale = [1046.50, 987.77, 880.00, 783.99, 698.46, 659.25, 587.33, 523.25];
+    let delay = 0.0;
+    for(let i=0;i<scale.length;i++){
+      const at = tn + delay;
+      const dur = 0.25 + i*0.06;
+      const detune = -i*18;           // progressively flat
+      const vol = 0.22 * Math.pow(0.88, i);
+      // Two oscillators per note — music-box style (sine + detuned sine)
+      const o1 = this.ctx.createOscillator(); o1.type='sine';
+      o1.frequency.value = scale[i]; o1.detune.value = detune;
+      const o2 = this.ctx.createOscillator(); o2.type='triangle';
+      o2.frequency.value = scale[i]*2; o2.detune.value = detune - 6;
+      const g = this.ctx.createGain(); g.gain.value = 0;
+      g.gain.linearRampToValueAtTime(vol, at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      const bp = this.ctx.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.value = scale[i]*1.2; bp.Q.value = 4;
+      o1.connect(bp); o2.connect(bp); bp.connect(g); g.connect(this.master);
+      o1.start(at); o1.stop(at + dur + 0.05);
+      o2.start(at); o2.stop(at + dur + 0.05);
+      delay += 0.28 + i*0.05;         // gap between notes grows
+    }
+    // Dusty noise bed under the scale — soft brush / felt hammers
+    const dustBuf = this.ctx.createBuffer(1, this.ctx.sampleRate*3, this.ctx.sampleRate);
+    const dd = dustBuf.getChannelData(0);
+    for(let i=0;i<dd.length;i++){
+      dd[i] = (Math.random()*2-1) * (1 - i/dd.length) * 0.35;
+    }
+    const dn = this.ctx.createBufferSource(); dn.buffer = dustBuf;
+    const dLp = this.ctx.createBiquadFilter(); dLp.type='lowpass';
+    dLp.frequency.value = 1800;
+    const dG = this.ctx.createGain(); dG.gain.value = 0;
+    dG.gain.linearRampToValueAtTime(0.12, tn + 0.2);
+    dG.gain.linearRampToValueAtTime(0, tn + 3.0);
+    dn.connect(dLp); dLp.connect(dG); dG.connect(this.master);
+    dn.start(tn);
+    // Final "thunk" after the last note
+    const thunkAt = tn + delay + 0.4;
+    const tO = this.ctx.createOscillator(); tO.type='sine';
+    tO.frequency.setValueAtTime(90, thunkAt);
+    tO.frequency.exponentialRampToValueAtTime(40, thunkAt + 0.3);
+    const tG = this.ctx.createGain(); tG.gain.value = 0;
+    tG.gain.linearRampToValueAtTime(0.18, thunkAt + 0.02);
+    tG.gain.exponentialRampToValueAtTime(0.0001, thunkAt + 0.45);
+    tO.connect(tG); tG.connect(this.master);
+    tO.start(thunkAt); tO.stop(thunkAt + 0.5);
   }
   setMusicIntensity(v){
     this._alert = v;
@@ -3336,25 +3399,168 @@ function triggerCatwalkPowerDown(){
   showToast('BUILDING A OFFLINE', 'Move on — the next exhibit is elsewhere.');
 }
 
+/* ============================================================
+   COOLING AUTOMATON — mesmerizing dancing figure in the cooling
+   yard. Rotates slowly, arms sway. When the water exhibit is
+   collected it winds down like a music box: rotation decelerates,
+   arms drop, the stained-glass glow fades.
+   ============================================================ */
+function updateCoolingAutomaton(dt){
+  const a = gs.coolingAutomaton;
+  if(!a) return;
+  // Rotation eases toward target (so wind-down slows smoothly to zero)
+  a.rotationSpeed += (a.targetRotationSpeed - a.rotationSpeed) * Math.min(1, dt * 0.9);
+  a.turntable.rotation.y += a.rotationSpeed * dt;
+  a.armSwayPhase += dt * a.rotationSpeed * 2.0;
+  // Arm sway — subtle up/down bob synchronized with rotation
+  const raise = Math.max(0, (a.rotationSpeed / 0.45));
+  for(let i=0; i<a.arms.length; i++){
+    const side = i === 0 ? -1 : 1;
+    const bob = Math.sin(a.armSwayPhase + side*0.6) * 0.12;
+    a.arms[i].rotation.z = bob * raise;
+    a.arms[i].rotation.y = side * Math.sin(a.armSwayPhase) * 0.08 * raise;
+  }
+  // Heart / halo gentle pulse while dancing
+  const pulse = 0.85 + Math.sin(gs.time * 1.8) * 0.15;
+  if(a.state === 'dancing'){
+    if(a.heart && a.heart.material) a.heart.material.opacity = 0.75 + pulse*0.25;
+    if(a.halo && a.halo.material) a.halo.material.opacity = 0.7 * raise;
+    if(a.inlay && a.inlay.material) a.inlay.material.opacity = 0.75 + pulse*0.2;
+    if(a.automatonLight) a.automatonLight.intensity = 1.4 + pulse*0.4;
+  }
+  // Wind-down progression
+  if(a.state === 'winding_down'){
+    const el = gs.time - a.windStart;
+    const k = Math.min(1, el / a.windDuration);
+    // Ease arms downward
+    for(let i=0; i<a.arms.length; i++){
+      const side = i === 0 ? -1 : 1;
+      a.arms[i].rotation.z = -side * k * 0.55;   // arms fall inward
+    }
+    // Fade emissives + opacities
+    const dim = 1 - k;
+    if(a.automatonLight) a.automatonLight.intensity = 1.4 * dim;
+    if(a.heart && a.heart.material) a.heart.material.opacity = 1.0 * dim;
+    if(a.halo && a.halo.material) a.halo.material.opacity = 0.7 * dim;
+    if(a.inlay && a.inlay.material) a.inlay.material.opacity = 0.85 * dim;
+    // Brass emissive damp-down
+    for(const m of a.materialsToDim){
+      if(m && m.emissive){
+        if(m._origEmissive === undefined) m._origEmissive = m.emissiveIntensity;
+        m.emissiveIntensity = m._origEmissive * dim;
+      }
+    }
+    if(k >= 1){
+      a.state = 'dead';
+      a.rotationSpeed = 0;
+      a.targetRotationSpeed = 0;
+    }
+  }
+}
+
+function triggerCoolingWindDown(){
+  const a = gs.coolingAutomaton;
+  if(a && a.state === 'dancing'){
+    a.state = 'winding_down';
+    a.windStart = gs.time;
+    a.targetRotationSpeed = 0;
+  }
+  // Music-box wind-down: play a descending, slowing, detuning scale on top
+  // of the existing theme, then ramp theme gain to 0 across ~5s.
+  audio.musicBoxWindDown();
+  // Hold music-room changes during the wind-down so the theme doesn't
+  // re-engage when the player re-enters the cooling yard later.
+  gs.coolingWindHeld = { start: gs.time, duration: 6.0 };
+  showToast('COOLING MECHANISM STOPPED', 'The automaton grinds to a halt.');
+}
+
 function updateCatwalkPowerDown(dt){
   const pd = gs.catwalkPowerDown;
   if(!pd || !pd.active) return;
   const elapsed = gs.time - pd.startedAt;
   const k = Math.min(1, elapsed / pd.duration);
-  // Dim all rack LED material opacities toward 0. Using material.opacity
-  // so the bright animated LED texture fades uniformly.
+
+  // ---- Base fade: rack LED opacity → 0 ----
   for(const m of pd.ledMats){
     const start = m._powerDownStart ?? 1.0;
     m.opacity = Math.max(0, start * (1 - k));
   }
-  // Smoke rising from each rack — a steady trickle during `smokeDuration`.
+
+  // ---- SINISTER FLICKERS ----
+  // Phase 1 (0.8s → 1.4s): a couple of racks flash back on briefly, then
+  //                        die off again. Feels wrong.
+  // Phase 2 (2.4s — one-shot): ALL racks surge back on with a blood-red
+  //                            tint, camera shakes, a wet whisper plays.
+  //                            Fades over ~0.9s. "this isn't over."
+  // Phase 3 (after 4.0s): one rack keeps a dim pulsing red light
+  //                       indefinitely — something's still watching.
+  if(pd.ledMats.length){
+    if(elapsed > 0.8 && elapsed < 1.4 && !pd._preShock){
+      pd._preShock = true;
+      // Quick staccato flicker on ~3 random racks
+      for(let i=0;i<3;i++){
+        const m = pd.ledMats[Math.floor(Math.random()*pd.ledMats.length)];
+        if(!m) continue;
+        const save = m.opacity;
+        m.opacity = 0.9;
+        setTimeout(()=>{ m.opacity = Math.max(0, (m._powerDownStart||1) * (1 - Math.min(1, (gs.time - pd.startedAt) / pd.duration))); }, 120 + Math.random()*100);
+      }
+      audio.tone({freq:120, dur:0.08, type:'sawtooth', vol:0.08});
+    }
+    if(elapsed > 2.4 && !pd._surged){
+      pd._surged = true;
+      // FULL surge — all racks wash to red. We tint the material color
+      // and spike opacity; it fades over ~0.9s back to black.
+      pd._surgeStart = gs.time;
+      pd.surgeMats = [];
+      for(const m of pd.ledMats){
+        if(m._origColor === undefined) m._origColor = m.color ? m.color.clone() : null;
+        if(m.color) m.color.setHex(0xff2010);
+        m.opacity = 1.0;
+        pd.surgeMats.push(m);
+      }
+      audio.whisper();
+      audio.whisper();
+      audio.tone({freq:55, dur:1.2, type:'sawtooth', vol:0.18});
+      audio.noise({dur:0.6, vol:0.18, lp:900, hp:200});
+      shake(0.7);
+      showToast('STILL HERE', 'It is counting you.');
+    }
+  }
+  // Ramp the surge back down toward black over 0.9s
+  if(pd._surged && pd.surgeMats){
+    const sEl = gs.time - pd._surgeStart;
+    const sK = Math.min(1, sEl / 0.9);
+    for(const m of pd.surgeMats){
+      if(sK < 1){
+        m.opacity = Math.max(0, 1 - sK);
+      } else if(m._origColor){
+        // Restore the original color so the (now 0-opacity) material is
+        // ready for the ONE lingering rack to use below.
+        m.color.copy(m._origColor);
+      }
+    }
+    if(sK >= 1){
+      pd.surgeMats = null;
+      // Pick ONE rack to keep softly pulsing red — "something's still on"
+      if(pd.ledMats.length){
+        const keeper = pd.ledMats[Math.floor(pd.ledMats.length/2)];
+        if(keeper && keeper.color){ keeper.color.setHex(0x7a0808); }
+        pd.keeperMat = keeper;
+      }
+    }
+  }
+  // Permanent quiet red pulse on the keeper rack. Starts after the surge
+  // resolves and persists for the rest of the session.
+  if(pd.keeperMat){
+    const pulse = 0.25 + Math.abs(Math.sin(gs.time * 1.1)) * 0.2;
+    pd.keeperMat.opacity = pulse;
+  }
+
+  // ---- Smoke ----
   if(elapsed < pd.smokeDuration){
-    // ~1 spawn per frame across all racks — smoke is intentionally sparse
     if(pd.rackXZ.length && Math.random() < 0.65){
       const r = pd.rackXZ[Math.floor(Math.random() * pd.rackXZ.length)];
-      // Grey smoke particle with mild upward velocity, no gravity (we use
-      // the existing particle system which gives downward gravity — so we
-      // push upward strongly enough that it climbs before falling back).
       const px = r.x + (Math.random() - 0.5) * 0.8;
       const pz = r.z + (Math.random() - 0.5) * 0.8;
       spawnParticle(px, 3.5, pz,
@@ -3362,11 +3568,19 @@ function updateCatwalkPowerDown(dt){
         Math.random() < 0.5 ? 0x6a7078 : 0x4a5058, 1.2, 0.18);
     }
   }
-  // End condition: music is silent AND smoke window elapsed
+  // Active state ends after smoke window, but keeperMat pulse continues.
   if(elapsed > pd.smokeDuration){
     pd.active = false;
     pd.musicHeld = false;
   }
+}
+// The keeper pulse needs to continue even after pd.active is false.
+// We replay the keeper pulse inside its own update call from the main loop.
+function updateCatwalkKeeperPulse(dt){
+  const pd = gs.catwalkPowerDown;
+  if(!pd || !pd.keeperMat) return;
+  const pulse = 0.25 + Math.abs(Math.sin(gs.time * 1.1)) * 0.2;
+  pd.keeperMat.opacity = pulse;
 }
 
 function makeCoolingTowerTex(){
@@ -3641,6 +3855,140 @@ function decorateCooling(){
   const s = makeSignMesh('COOLING YARD — PRAIRIE DU CHIEN', 0x7ee5ff);
   s.position.set(0, 3.7, 20.8); scene.add(s);
   addEvidencePickup('water', 0, 1.3, 36, 0x7ee5ff);
+
+  // ---- MESMERIZING AUTOMATON ----
+  // Porcelain + brass ballet figure that slowly rotates with extended arms.
+  // On water-pickup it winds down (like a music box running out of tension):
+  // rotation decelerates, lights fade, arms drop. Detailed enough to feel
+  // like a centerpiece; positioned south of the evidence so the player
+  // passes in front of it on approach.
+  const automaton = new THREE.Group();
+  automaton.position.set(0, 0, 26);
+  scene.add(automaton);
+
+  // Circular brass base plinth with engraved ring
+  const baseMat = new THREE.MeshStandardMaterial({color:0x7a5a2a, metalness:0.95, roughness:0.35,
+                   emissive:0x2a1a0a, emissiveIntensity:0.3});
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.05, 0.22, 32), baseMat);
+  base.position.y = 0.11; automaton.add(base);
+  // Base engraving ring (a slightly brighter torus)
+  const engrave = new THREE.Mesh(new THREE.TorusGeometry(0.82, 0.025, 8, 32),
+    new THREE.MeshStandardMaterial({color:0xffe0a0, metalness:0.9, roughness:0.2,
+      emissive:0x8a6a2a, emissiveIntensity:0.5}));
+  engrave.rotation.x = Math.PI/2;
+  engrave.position.y = 0.22; automaton.add(engrave);
+
+  // Rotating TURNTABLE group — everything above the base rotates together
+  const turntable = new THREE.Group();
+  turntable.position.y = 0.22;
+  automaton.add(turntable);
+
+  // Porcelain body — tall cylinder with gold trim bands
+  const porcelainMat = new THREE.MeshStandardMaterial({
+    color:0xf0ece2, metalness:0.1, roughness:0.25,
+    emissive:0x8aa4b8, emissiveIntensity:0.1
+  });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.45, 1.6, 24), porcelainMat);
+  body.position.y = 0.8; turntable.add(body);
+  // Gold trim bands (three horizontal rings around the body)
+  const trimMat = new THREE.MeshStandardMaterial({color:0xd0a644, metalness:0.95, roughness:0.2,
+                   emissive:0x8a6a24, emissiveIntensity:0.3});
+  for(const by of [0.3, 0.95, 1.55]){
+    const r = 0.45 - (by - 0.2) * 0.08;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r, 0.035, 8, 22), trimMat);
+    ring.rotation.x = Math.PI/2;
+    ring.position.y = by; turntable.add(ring);
+  }
+  // Blue stained-glass inlay — vertical window on the front of the body
+  const inlayMat = new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.85,
+                    side:THREE.DoubleSide});
+  const inlay = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.9), inlayMat);
+  inlay.position.set(0, 0.8, 0.46); turntable.add(inlay);
+  // A brighter core sphere behind the inlay (visible through the glass)
+  const heartMat = new THREE.MeshBasicMaterial({color:0xcbf5ff});
+  const heart = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 10), heartMat);
+  heart.position.set(0, 0.8, 0.3); turntable.add(heart);
+
+  // Shoulders / shoulder pads — small orbs
+  const shoulderMat = porcelainMat;
+  for(const side of [-1, 1]){
+    const sho = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 10), shoulderMat);
+    sho.position.set(side * 0.3, 1.55, 0); turntable.add(sho);
+  }
+  // Arms — extended sideways. Each arm is a parent group so we can raise/
+  // lower them during wind-down.
+  const arms = [];
+  for(const side of [-1, 1]){
+    const armGroup = new THREE.Group();
+    armGroup.position.set(side * 0.32, 1.55, 0);
+    turntable.add(armGroup);
+    const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.55, 10), porcelainMat);
+    upper.position.set(side * 0.28, 0, 0);
+    upper.rotation.z = side * Math.PI/2;
+    armGroup.add(upper);
+    // Elbow orb
+    const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.09, 12, 10), porcelainMat);
+    elbow.position.set(side * 0.56, 0, 0);
+    armGroup.add(elbow);
+    // Forearm reaches outward and slightly upward (balletic)
+    const fore = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 10), porcelainMat);
+    fore.position.set(side * 0.78, 0.08, 0);
+    fore.rotation.z = side * Math.PI/2 - side * 0.3;
+    armGroup.add(fore);
+    // Hand — a small stained-glass petal
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8),
+      new THREE.MeshStandardMaterial({color:0x7ee5ff, transparent:true, opacity:0.8,
+        emissive:0x7ee5ff, emissiveIntensity:0.8}));
+    hand.position.set(side * 0.98, 0.18, 0);
+    armGroup.add(hand);
+    arms.push(armGroup);
+  }
+
+  // Neck + head
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.15, 12), porcelainMat);
+  neck.position.y = 1.7; turntable.add(neck);
+  // Head is a glowing cyan orb with stained-glass crown
+  const headCore = new THREE.Mesh(new THREE.SphereGeometry(0.24, 18, 14),
+    new THREE.MeshStandardMaterial({color:0xf0ece2, metalness:0.1, roughness:0.2,
+      emissive:0x2a6080, emissiveIntensity:0.4}));
+  headCore.position.y = 1.95; turntable.add(headCore);
+  // Halo / crown — thin ring above the head
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.28, 0.025, 8, 26),
+    new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.8}));
+  halo.rotation.x = Math.PI/2; halo.position.y = 2.2;
+  turntable.add(halo);
+  // Crown shards — five tiny vertical stained-glass pieces arranged in a ring
+  for(let i=0; i<5; i++){
+    const ang = (i / 5) * Math.PI * 2;
+    const shard = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.02),
+      new THREE.MeshBasicMaterial({color:0x7ee5ff, transparent:true, opacity:0.75}));
+    shard.position.set(Math.cos(ang) * 0.28, 2.26, Math.sin(ang) * 0.28);
+    shard.rotation.y = -ang;
+    turntable.add(shard);
+  }
+
+  // Inner bright point light (cool blue, faint, part of the mesmerizing glow)
+  const automatonLight = new THREE.PointLight(0x9de8ff, 1.6, 7);
+  automatonLight.position.set(0, 1.3, 0);
+  automaton.add(automatonLight);
+
+  // Collision cylinder so the player can't walk through the automaton
+  gs.walls.push({minX:-0.95, maxX:0.95, minZ:25.05, maxZ:26.95});
+
+  // Register with state so updateAutomaton can animate it
+  gs.coolingAutomaton = {
+    group: automaton,
+    turntable, arms, heart, halo, inlay,
+    automatonLight, headCore,
+    state: 'dancing',       // 'dancing' | 'winding_down' | 'dead'
+    rotationSpeed: 0.45,
+    targetRotationSpeed: 0.45,
+    armSwayPhase: 0,
+    windStart: 0,
+    windDuration: 5.5,
+    materialsToDim: [inlayMat, heartMat, trimMat, engrave.material,
+                     baseMat, porcelainMat, headCore.material]
+  };
 }
 function decorateOffice(){
   const woodMat = new THREE.MeshStandardMaterial({color:0x3a2a1a, roughness:0.8, metalness:0.1});
@@ -5697,6 +6045,9 @@ function collectPickup(pu){
       // Catwalk power-down on the grid exhibit: Building A goes quiet —
       // music fades over 5s, rack LEDs die off, smoke rises from the racks.
       if(pu.key === 'grid') triggerCatwalkPowerDown();
+      // Cooling Yard wind-down on the water exhibit: music-box-running-
+      // out collapse + the automaton stops dancing + lights fade.
+      if(pu.key === 'water') triggerCoolingWindDown();
       if(allEvidence() && !gs.bossSpawned){
         spawnBoss();
       } else if(!allEvidence()){
@@ -6291,11 +6642,21 @@ function updateRoomTracking(){
     if(ctx.inCorridor && lastSolid === 'Lobby' && destForCorridor){
       gs.network.litRooms[destForCorridor] = true;
     }
-    // If the player walks directly into any room (e.g., back to lobby), also
-    // ensure that room is lit.
-    if(roomNow && gs.network.litRooms && !gs.network.litRooms[roomNow]){
-      gs.network.litRooms[roomNow] = true;
-    }
+  }
+  // Lobby lights up only once the player walks NORTH past the reception
+  // desk (desk sits at z=-8 running x=-4..4; spawn is behind it at z=-10.5).
+  // Threshold z>-7 fires the moment the player steps around the desk.
+  if(roomNow === 'Lobby' && gs.player.pos.z > -7 &&
+     gs.network.litRooms && !gs.network.litRooms['Lobby']){
+    gs.network.litRooms['Lobby'] = true;
+  }
+  // Any non-lobby destination room: on walk-in it's already been lit by
+  // the pink-line handler above, but double-check for rooms you could
+  // enter without going through a corridor (not really possible here,
+  // but defensive).
+  if(roomNow && roomNow !== 'Lobby' && gs.network.litRooms &&
+     !gs.network.litRooms[roomNow]){
+    gs.network.litRooms[roomNow] = true;
   }
 
   // Decide the MUSIC room independent of the network zone.
@@ -6313,9 +6674,10 @@ function updateRoomTracking(){
   if(isSubstation && (!trap || trap.state === 'inactive')) musicRoom = null;
   // A set-piece can pin music to a specific theme regardless of location.
   if(gs._musicOverride) musicRoom = gs._musicOverride;
-  // Catwalk power-down: hold the theme gain ramp steady (no setRoom calls
-  // that would reset the fade) for the duration of the power-down.
-  if(gs.catwalkPowerDown && gs.catwalkPowerDown.musicHeld){
+  // Set-piece holds that suppress any setRoom calls while a scripted
+  // audio fade is playing out.
+  if(gs.catwalkPowerDown && gs.catwalkPowerDown.musicHeld) return;
+  if(gs.coolingWindHeld && (gs.time - gs.coolingWindHeld.start) < gs.coolingWindHeld.duration){
     return;
   }
   audio.setRoom(musicRoom);
@@ -6623,16 +6985,19 @@ function init(){
     if(e.code==='KeyE') input.interact = true;
     if(e.code==='KeyF') input.flashlight = !input.flashlight;
     if(e.code==='Escape'){ togglePause(); }
-    // Space fires in addition to jumping — gives trackpad / keyboard-only
-    // players a way to shoot without having to click.
-    if(e.code==='Space' && gs.phase==='playing') input.firing = true;
+    // Shift fires in addition to sprinting — gives keyboard-only players
+    // a way to shoot without clicking. Sprint still works on the same key.
+    if((e.code==='ShiftLeft' || e.code==='ShiftRight') && gs.phase==='playing'){
+      input.firing = true;
+    }
     if(['KeyW','KeyA','KeyS','KeyD','Space'].includes(e.code)) e.preventDefault();
   });
   addEventListener('keyup', e=>{
     input.keys.delete(e.code);
-    // Only release fire on Space-up if LMB is not currently held. Avoids
-    // the Space release killing an in-progress LMB fire-hold.
-    if(e.code==='Space') input.firing = input.mouseFiring === true;
+    // Release fire on Shift-up only if mouse isn't currently held.
+    if(e.code==='ShiftLeft' || e.code==='ShiftRight'){
+      input.firing = input.mouseFiring === true;
+    }
   });
   addEventListener('mousemove', e=>{
     if(input.lock){ input.mx += e.movementX; input.my += e.movementY; }
@@ -7006,6 +7371,8 @@ function loop(){
     updateRoomTracking();       // every frame — music/network follow pink/orange boundaries
     updateSubstationTrap(dt);
     updateCatwalkPowerDown(dt);
+    updateCatwalkKeeperPulse(dt);
+    updateCoolingAutomaton(dt);
     updateNetwork(dt);
     updateRainbowMode(dt);
     updateMonitorGlitch(dt);
