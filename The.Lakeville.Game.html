@@ -1525,13 +1525,22 @@ function buildLevel(){
   const wallMat  = new THREE.MeshStandardMaterial({map:wallTex,  roughness:0.65, metalness:0.3});
   const ceilMat  = new THREE.MeshStandardMaterial({map:ceilTex,  roughness:0.9,  metalness:0.05});
 
-  function addRoom(name, x, z, w, d, ceilingY=4.4){
+  function addRoom(name, x, z, w, d, ceilingY=4.4, ceilInset=0.1){
     const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, d), floorMat);
     floor.position.set(x, -0.1, z); scene.add(floor);
-    const ceil = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, d), ceilMat);
+    // Ceiling is INSET horizontally by ceilInset on each side (default 0.1m).
+    // Walls are 0.2m thick centered on room edges — interior face is inset
+    // 0.1m from nominal. A ceiling exactly matching nominal w×d overlaps
+    // the wall boxes along a 0.1m strip at ceiling height, which produced
+    // a 12m-long z-fight strip in Corr W that read as persistent flicker
+    // under the flickering corridor light. Insetting the ceiling so its
+    // edge meets the wall's INTERIOR face eliminates the mesh intersection.
+    const cw = Math.max(0.4, w - 2*ceilInset);
+    const cd = Math.max(0.4, d - 2*ceilInset);
+    const ceil = new THREE.Mesh(new THREE.BoxGeometry(cw, 0.2, cd), ceilMat);
     ceil.position.set(x, ceilingY, z); scene.add(ceil);
     gs.rooms.push({name, x, z, w, d, ceilingY});
-    return {x, z, w, d};
+    return {x, z, w, d, ceil};
   }
   function addWall(x1,z1,x2,z2, h=6.0, thick=0.2){
     const dx = x2-x1, dz=z2-z1;
@@ -1567,7 +1576,7 @@ function buildLevel(){
   }
 
   // Rooms
-  addRoom('Lobby', 0,0, 24,24, 9.0);   // cathedral-tall lobby for the chandelier
+  const lobbyRoom = addRoom('Lobby', 0,0, 24,24, 9.0);   // cathedral-tall lobby for the chandelier
   addRoom('Server Hall A', 40,0, 32,26, 6.0);
   addRoom('Substation', -40,0, 28,22);
   addRoom('Cooling Tower 03', 0,34, 28,28);
@@ -1578,6 +1587,17 @@ function buildLevel(){
   addRoom('Corr N', 0,16, 6,8);
   addRoom('Corr F', 0, 50, 6, 12);
 
+  // Lobby ceiling is 9m up — far enough from lamp range that without a
+  // little self-emission it reads as "odd black top." A dim emissive
+  // warms the cathedral vault so the raised height is legible from the
+  // floor. Cloned material so other ceilings stay unchanged.
+  if(lobbyRoom && lobbyRoom.ceil){
+    const lobbyCeilMat = lobbyRoom.ceil.material.clone();
+    lobbyCeilMat.emissive = new THREE.Color(0x1c2a22);
+    lobbyCeilMat.emissiveIntensity = 0.45;
+    lobbyRoom.ceil.material = lobbyCeilMat;
+  }
+
   // Lobby walls with gaps toward corridors. South wall is SEALED — the
   // Community Development corridor is cut in this build, so the lobby
   // south wall is now solid (OLAM signage hangs on it from the inside).
@@ -1587,32 +1607,36 @@ function buildLevel(){
   addWall(-12, -12, 12, -12, 9.0);                // south wall: SEALED
   addWallWithGap('z', 12, -12, 12, 0, 6, 9.0);    // east wall:  gap → Corr E
   addWallWithGap('z', -12, -12, 12, 0, 6, 9.0);   // west wall:  gap → Corr W
-  // Lintels above each lobby corridor doorway — seal the vertical gap
-  // between the (shorter) corridor ceiling and the raised lobby
-  // ceiling. Without these you'd see a strip of void above each
-  // corridor opening when looking through the doorway from the lobby.
+  // Lintels above each lobby corridor doorway — seal the vertical void
+  // between the (shorter) corridor ceiling and the raised lobby ceiling.
   //
-  // Z-fighting fix #2: The PREVIOUS pass positioned lintels at the
-  // exact wall plane (x=-12 for west, etc.), but the wall mesh itself
-  // has a 0.2m thickness centered on that plane. The lintel's own
-  // thickness overlapped with the wall mesh, causing flicker along
-  // the corridor boundary. Lintels are now shifted INTO the lobby
-  // interior so there's clear space between them and the wall mesh.
+  // Lintels sit IN the wall plane (flush with the 0.2m wall thickness),
+  // z-inset 0.1m on each side so they meet the adjacent wall segments
+  // edge-to-edge with no volume overlap (= no z-fight). Each spans from
+  // the corridor ceiling's BOTTOM face up to the lobby ceiling's BOTTOM
+  // face, so any ray grazing the corridor ceiling from the lobby side
+  // is occluded instead of slipping into the attic void above.
+  //
+  // That's why the "mini-attic" (separate attic-cap ceiling visible
+  // through the doorway at y~6) is gone — the lintel itself closes the
+  // entire vertical slot, corridor-ceiling-bottom to lobby-ceiling-
+  // bottom, with no visible gap between.
   const lobbyLintelMat = new THREE.MeshStandardMaterial({
     color:0x1a2520, roughness:0.7, metalness:0.25
   });
-  // Corr N — corridor ceiling 4.4 (top at 4.5). Lintel y = 4.5..8.9.
-  const lintelNh = 4.4, lintelNy = 4.5 + lintelNh / 2;
-  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(6, lintelNh, 0.2), lobbyLintelMat);
-  lintelN.position.set(0, lintelNy, 11.7); scene.add(lintelN);    // INSIDE north wall
-  // Corr W — corridor ceiling 4.4 (top at 4.5). Same 4.4m tall.
-  const lintelWh = 4.4, lintelWy = 4.5 + lintelWh / 2;
-  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.2, lintelWh, 6), lobbyLintelMat);
-  lintelW.position.set(-11.7, lintelWy, 0); scene.add(lintelW);   // INSIDE west wall
-  // Corr E — corridor ceiling 6.0 (top at 6.1). Shorter lintel.
-  const lintelEh = 2.8, lintelEy = 6.1 + lintelEh / 2;
-  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.2, lintelEh, 6), lobbyLintelMat);
-  lintelE.position.set(11.7, lintelEy, 0); scene.add(lintelE);    // INSIDE east wall
+  // Corr N — corridor ceiling bottom y=4.3, lobby ceiling bottom y=8.9.
+  // Lintel y=4.3..8.9, thickness 0.2m in z (wall plane z=12),
+  // 5.8m wide in x (z-inset 0.1 each side of the 6m gap).
+  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(5.8, 4.6, 0.2), lobbyLintelMat);
+  lintelN.position.set(0, 6.6, 12); scene.add(lintelN);
+  // Corr W — same 4.3..8.9 span, 0.2m thick in x at wall plane x=-12,
+  // 5.8m wide in z.
+  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.6, 5.8), lobbyLintelMat);
+  lintelW.position.set(-12, 6.6, 0); scene.add(lintelW);
+  // Corr E — corridor ceiling bottom y=5.9 (ceilingY=6.0), lobby ceiling
+  // bottom y=8.9. Lintel y=5.9..8.9, 3.0m tall.
+  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.0, 5.8), lobbyLintelMat);
+  lintelE.position.set(12, 7.4, 0); scene.add(lintelE);
 
   // Server hall (taller — accommodates the catwalk and head clearance)
   addWallWithGap('z', 24, -13, 13, 0, 6, 6.0);
@@ -1667,22 +1691,21 @@ function buildLevel(){
   // sWFill / sFill already floor over — now they also get a ceiling so the
   // skybox isn't visible from below.
   const capMat = new THREE.MeshStandardMaterial({map:ceilTex, roughness:0.9, metalness:0.05});
-  const wCap = new THREE.Mesh(new THREE.BoxGeometry(2, 0.2, 6), capMat);
-  wCap.position.set(-25, 4.4, 0); scene.add(wCap);        // Corr W ↔ Substation ceiling cap
+  // Corr W ↔ Substation ceiling cap. Substation ceiling now ends at
+  // x=-26.1 and Corr W ceiling starts at x=-23.9 (both inset 0.1m from
+  // nominal). wCap bridges 2.2m of x and is z-inset to 5.8m so it sits
+  // inside the corridor walls without overlap.
+  const wCap = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 5.8), capMat);
+  wCap.position.set(-25, 4.4, 0); scene.add(wCap);
   // (Corr S ↔ Community Dev ceiling cap removed with that corridor.)
 
-  // ATTIC CAPS — seal the void between each corridor's own (lower)
-  // ceiling and the top of its walls. Corridor walls are 6m tall but
-  // Corr N and Corr W ceilings are only 4.4m. Looking into those
-  // corridors from the raised lobby, you could see above the corridor
-  // ceiling into a walled-in attic space with no top — skybox leak.
-  // A solid cap at the corridor wall top seals that roof.
-  const attNCap = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 8.2), capMat);
-  attNCap.position.set(0, 6.05, 16); scene.add(attNCap);        // over Corr N
-  const attWCap = new THREE.Mesh(new THREE.BoxGeometry(12.2, 0.2, 6), capMat);
-  attWCap.position.set(-18, 6.05, 0); scene.add(attWCap);        // over Corr W
-  const attFCap = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 9.2), capMat);
-  attFCap.position.set(0, 6.05, 50); scene.add(attFCap);        // over Corr F (filing)
+  // (Attic caps removed — the new wall-plane lintels extend all the way
+  // down to the corridor ceiling's bottom face, so nothing above the
+  // corridor ceiling is visible from the lobby anyway. The old attic
+  // caps were reading as a confusing "higher hallway ceiling" through
+  // the doorway, separated from the lower ceiling by a visible slab of
+  // empty wall — an architectural non sequitur. With the lintels doing
+  // the full vertical seal, the attic space is just invisible.)
 
   // Filing room
   addWallWithGap('x', 53, -7, 7, 0, 6);
@@ -1722,17 +1745,11 @@ function buildLevel(){
     band.position.set(x, 2.2, z);
     scene.add(band);
   }
-  // SEAM CAPS — additionally close the y=4.4..6.0 void above Corr E (the
-  // only corridor adjacent to a taller-ceiling room). The existing lintel
-  // at x=24 seals the Building A face; also seal the corridor side walls.
-  const seamCapMat = new THREE.MeshStandardMaterial({color:0x12181a, roughness:0.85, metalness:0.2});
-  const seamN = new THREE.Mesh(new THREE.BoxGeometry(12.4, 1.7, 0.25), seamCapMat);
-  seamN.position.set(18, 5.25, 3);   scene.add(seamN);
-  const seamS = new THREE.Mesh(new THREE.BoxGeometry(12.4, 1.7, 0.25), seamCapMat);
-  seamS.position.set(18, 5.25, -3);  scene.add(seamS);
-  // Top cap over Corr E between ceiling and Building A ceiling height
-  const corrETopCap = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.1, 6.4), seamCapMat);
-  corrETopCap.position.set(18, 5.95, 0); scene.add(corrETopCap);
+  // (Legacy seam caps removed: they were closing a y=4.4..6.0 void that
+  // existed when Corr E's ceiling was 4.4m. Corr E is now 6.0m and its
+  // inset ceiling already meets the wall interior cleanly — the old
+  // corrETopCap in particular was a second coplanar ceiling at y=5.9
+  // directly overlapping the real Corr E ceiling, a guaranteed z-fight.)
 
   addDoorframes();
   decorateLobby();
@@ -2073,14 +2090,13 @@ function buildNetworkGraph(){
   F(0, 56, 0, 66.9, { onPath:true, pathIndex:4 });
 
   // ---- LOBBY TREE ----
-  // Desk → center trunk, plus three branch groups (N / E / W). Each
-  // branch group is two parallel crackling "lightning" paths that fan
-  // out from close together at center to wider apart at the corridor
-  // mouth — so each branch reads like a forked bolt rather than two
-  // parallel rails. Each path is a SINGLE continuous ribbon mesh
-  // (addNetFloorPolyline) so there are no angle-break gaps between
-  // zigzag segments. Trunk → 'accent' (dims only on the third clear);
-  // each branch group → its room (dims on that single clear).
+  // Trunk + three branch groups (N/E/W). All lines are now EXCISED
+  // inside the 3.6m circle under the chandelier — they start at the
+  // bronze rim and radiate outward. The circle interior is empty of
+  // green, so the mat itself reads as the source of the pattern, and
+  // the rim (updated by updateLobbyCircle below) is what the player
+  // activates by stepping onto it.
+  const CIRCLE_R = 3.6;
   const zigzagPath = (x1, z1, x2, z2, steps, jitter, opts) => {
     const dx = x2 - x1, dz = z2 - z1;
     const len = Math.hypot(dx, dz);
@@ -2099,25 +2115,24 @@ function buildNetworkGraph(){
     addNetFloorPolyline(pts, { ...opts, width: 0.45 });
   };
 
-  // Main trunk — reception desk ↘ lobby center. Slightly jagged, mostly
-  // straight, single ribbon. Dims only when the third room is cleared.
-  zigzagPath(0, -10.5, 0, 0, 4, 0.35, { leadsTo: 'accent' });
+  // Main trunk — reception desk ↗ lobby circle's SOUTH perimeter.
+  // Stops at z=-CIRCLE_R so the trunk meets the bronze rim and doesn't
+  // intrude into the disc.
+  zigzagPath(0, -10.5, 0, -CIRCLE_R, 4, 0.35, { leadsTo: 'accent' });
 
-  // Helper for a forked branch: two crackling paths, starting close
-  // together at `start` and ending well apart near the corridor mouth.
+  // Helper for a forked branch. `sx,sz` is the start (on the rim);
+  // `ex,ez` is the destination near the corridor mouth. The two paths
+  // diverge by innerSpread at the start and perpSpread at the end.
   const fork = (sx, sz, ex, ez, perpSpread, steps, jitter, opts) => {
-    // Compute perpendicular offsets at start (narrow) and end (wide).
     const dx = ex - sx, dz = ez - sz;
     const L = Math.hypot(dx, dz) || 1;
     const nx = -dz / L, nz = dx / L;
     const innerSpread = 0.25;
-    // Left path
     zigzagPath(
       sx + nx * innerSpread,  sz + nz * innerSpread,
       ex + nx * perpSpread,   ez + nz * perpSpread,
       steps, jitter, opts
     );
-    // Right path
     zigzagPath(
       sx - nx * innerSpread,  sz - nz * innerSpread,
       ex - nx * perpSpread,   ez - nz * perpSpread,
@@ -2125,15 +2140,15 @@ function buildNetworkGraph(){
     );
   };
 
-  // NORTH branch → Corr N mouth at (0, 11.9), forked paths ending ±2.5
-  // apart (the Corr N gap is 6 wide so ±2.5 still fits inside).
-  fork(0, 0, 0, 11.9, 2.5, 6, 1.4, { leadsTo: 'Cooling Yard' });
-
-  // EAST branch → Corr E mouth at (11.9, 0), forked paths ending ±2.5.
-  fork(0, 0, 11.9, 0, 2.5, 6, 1.4, { leadsTo: 'Building A — Light Industrial' });
-
-  // WEST branch → Corr W mouth at (-11.9, 0), forked paths ending ±2.5.
-  fork(0, 0, -11.9, 0, 2.5, 6, 1.4, { leadsTo: 'Substation' });
+  // Each branch now STARTS at the rim perimeter in its cardinal
+  // direction (N/E/W) instead of at (0,0). Nothing crosses the disc.
+  //
+  // NORTH branch → rim north point (0, +R) → Corr N mouth at (0, 11.9).
+  fork(0,  CIRCLE_R, 0, 11.9, 2.5, 6, 1.4, { leadsTo: 'Cooling Yard' });
+  // EAST branch → rim east point (+R, 0) → Corr E mouth at (11.9, 0).
+  fork( CIRCLE_R, 0, 11.9, 0, 2.5, 6, 1.4, { leadsTo: 'Building A — Light Industrial' });
+  // WEST branch → rim west point (-R, 0) → Corr W mouth at (-11.9, 0).
+  fork(-CIRCLE_R, 0, -11.9, 0, 2.5, 6, 1.4, { leadsTo: 'Substation' });
 
   // BUILDING A internal branches — span wall-to-wall at z=±12.9
   F(28, -12.9, 28, 12.9);
@@ -3020,7 +3035,11 @@ function decorateLobbyCenterpiece(){
   inlay.rotation.x = -Math.PI/2;
   inlay.position.set(cx, 0.022, cz);
   scene.add(inlay);
-  // Thin raised brass rim around the inlay
+  // Thin raised brass rim around the inlay. The rim is the INTERACTIVE
+  // band — when the player steps onto the disc, updateLobbyCircle
+  // shifts the emissive from bronze toward the searing green of the
+  // floor network and adds a slow pulse, so the rim reads as the
+  // activation source for the green pattern radiating out from it.
   const rimMat = new THREE.MeshStandardMaterial({
     color:0xc9a548, metalness:0.95, roughness:0.18,
     emissive:0x3a2a0a, emissiveIntensity:0.3
@@ -3029,6 +3048,14 @@ function decorateLobbyCenterpiece(){
   rim.rotation.x = Math.PI/2;
   rim.position.set(cx, 0.04, cz);
   scene.add(rim);
+  gs.lobbyCircle = {
+    rimMat,
+    cx, cz,
+    radius: 3.6,
+    activation: 0,     // 0 = dormant (bronze); 1 = fully lit (green)
+    bronzeEmissive: new THREE.Color(0x3a2a0a),
+    greenEmissive:  new THREE.Color(0x1faa3c)   // matches lobby network hex 0x00ff44 toned for emissive
+  };
 
   // ---- FLANKING PYLONS ----
   // Two black-obsidian columns. Shifted 3m north of the chandelier
@@ -3389,6 +3416,33 @@ function updateLobbyChandelier(dt){
     c.nextTwitch = 6 + Math.random()*9;
   }
 }
+
+// Brass rim under the chandelier. Dormant (bronze, dim) until the
+// player steps onto the disc, then shifts emissive toward the
+// network's searing lobby green and starts a slow pulse. The rim is
+// the visible "source" of the lightning-tree branches radiating out
+// from it.
+function updateLobbyCircle(dt){
+  const lc = gs.lobbyCircle;
+  if(!lc || !lc.rimMat) return;
+  const dx = gs.player.pos.x - lc.cx;
+  const dz = gs.player.pos.z - lc.cz;
+  const dist = Math.hypot(dx, dz);
+  const inside = dist < lc.radius;
+  // Ease activation toward target. Entering feels responsive
+  // (~0.35s to full on); leaving decays slower (~0.9s) so the rim
+  // doesn't snap off the moment the player steps over the edge.
+  const target = inside ? 1 : 0;
+  const k = inside ? Math.min(1, dt * 2.8) : Math.min(1, dt * 1.1);
+  lc.activation += (target - lc.activation) * k;
+  const a = lc.activation;
+  // Emissive color: bronze ↔ green lerp.
+  lc.rimMat.emissive.copy(lc.bronzeEmissive).lerp(lc.greenEmissive, a);
+  // Emissive intensity: baseline 0.3 + activated pulse up to ~1.6.
+  const pulse = 0.9 + Math.sin(gs.time * 2.6) * 0.35;
+  lc.rimMat.emissiveIntensity = 0.3 + a * pulse;
+}
+
 function decorateServerHall(){
   const rackMat = new THREE.MeshStandardMaterial({color:0x0f1a14, roughness:0.5, metalness:0.7});
   for(let row=0; row<4; row++){
@@ -4721,31 +4775,42 @@ function updateCoolingAutomaton(dt){
 
 function _updateOneAutomaton(a, dt){
   if(!a) return;
-  // Rhythm: the figure is ALWAYS either accelerating or decelerating —
-  // never holding a constant speed. Two phases, cycling continuously:
-  //   accel — 2 seconds ramp from slow → top  (smoothstep curve)
-  //   decel — 1 second  ramp from top → slow  (ease-out, "spring
-  //           running out" — sharp at the start of the decel, easing
-  //           as speed approaches the slow baseline)
-  // Cycle length is ~3s. Each dancer starts mid-phase at a random
-  // offset so the four in the room never drive the same beat.
+  // Three-phase merry-go-round rhythm (set up in buildWireDancer):
+  //   accel — 1.4–1.9s burst. Ease-out curve (rapid rise, tapering
+  //           as it nears top). The "shove."
+  //   peak  — 0.3–0.55s hold at top. Brief by design — the fast part
+  //           is the impression of momentum, not a plateau.
+  //   decel — 2.0–2.4s steady, near-linear fall back to the slow
+  //           baseline. Friction bleeding off angular momentum.
+  // Cycle length ~3.7–4.85s. Each dancer started mid-phase at a random
+  // offset with numbers ±10% so cycles drift relative to each other.
   const R = a.rhythm;
   if(a.state === 'dancing' && R){
     R.phaseT += dt;
-    const dur = (R.phase === 'accel') ? R.accelDuration : R.decelDuration;
+    const dur = R.phase === 'accel' ? R.accelDuration
+              : R.phase === 'peak'  ? R.peakDuration
+              :                       R.decelDuration;
     const raw = Math.min(1, R.phaseT / dur);
-    let k;
     if(R.phase === 'accel'){
-      // Smoothstep: gentle start, fastest in middle, gentle at top
-      k = raw * raw * (3 - 2 * raw);
+      // Ease-out: 1 − (1−raw)^2.2. At raw=0.3, k≈0.54 (54% of range
+      // covered in 30% of time — rapid early rise). At raw=0.7, k≈0.91.
+      // Most of the speed-up happens in the first half of the burst.
+      const k = 1 - Math.pow(1 - raw, 2.2);
       a.rotationSpeed = R.slowSpeed + (R.topSpeed - R.slowSpeed) * k;
+    } else if(R.phase === 'peak'){
+      // Hold at top. Kept short — the dancer reads as momentarily
+      // "wound up" then gravity takes over.
+      a.rotationSpeed = R.topSpeed;
     } else {
-      // Ease-out: sharp drop at the start, easing into the slow speed
-      k = 1 - Math.pow(1 - raw, 2.2);
+      // Steady decel. Nearly linear with a tiny convex tail so the
+      // handoff into the next accel burst doesn't pop.
+      const k = raw * 0.94 + Math.pow(raw, 1.6) * 0.06;
       a.rotationSpeed = R.topSpeed - (R.topSpeed - R.slowSpeed) * k;
     }
     if(raw >= 1){
-      R.phase = (R.phase === 'accel') ? 'decel' : 'accel';
+      R.phase = R.phase === 'accel' ? 'peak'
+              : R.phase === 'peak'  ? 'decel'
+              :                       'accel';
       R.phaseT = 0;
     }
     a.targetRotationSpeed = a.rotationSpeed;
@@ -5596,28 +5661,43 @@ function buildWireDancer(cx, cy, cz){
     }
   });
 
-  // Continuous accel/decel rhythm — each dancer starts mid-phase at a
-  // random offset so the four in the same room never drive the same
-  // beat. Top/slow speeds and durations vary ~10% per dancer so cycles
-  // drift relative to each other over time. Both speed bands are 30%
-  // higher than the previous tuning, and both phase durations are
-  // roughly doubled — the figures wind up further and take longer to
-  // let it out, so you see more of each curve before it flips.
+  // Rhythm — merry-go-round model. Somebody shoves the carousel every
+  // few seconds: a short burst that ramps up fast and slows as it nears
+  // the top; a brief moment at peak; then momentum bleeds off steadily
+  // for ~2s until the next shove. The three phases:
+  //   accel — 1.4–1.9s burst. Ease-out: rate is fastest early and
+  //           tapers as it approaches the top. ("Rate of acceleration
+  //           slows near top speed.")
+  //   peak  — 0.3–0.55s at top. Kept short on purpose — the fast part
+  //           is an impression, not a plateau.
+  //   decel — 2.0–2.4s steady, nearly-linear fall back to slow.
+  // Each dancer randomizes numbers ~10% so four in the same room drift
+  // out of sync over time; each starts mid-phase at a random offset so
+  // they never pop into existence together.
   const topSpeed    = 3.25 + Math.random() * 0.65;  // ~3.25–3.9 rad/s
   const slowSpeed   = 0.45 + Math.random() * 0.2;   // ~0.45–0.65 rad/s
-  const accelDur    = 3.6 + Math.random() * 1.0;    // ~3.6–4.6s ramp up
-  const decelDur    = 1.7 + Math.random() * 0.6;    // ~1.7–2.3s ramp down
-  const startPhase  = Math.random() < 0.5 ? 'accel' : 'decel';
-  const startT      = Math.random() * (startPhase === 'accel' ? accelDur : decelDur);
+  const accelDur    = 1.4 + Math.random() * 0.5;    // ~1.4–1.9s burst
+  const peakDur     = 0.3 + Math.random() * 0.25;   // ~0.3–0.55s at top
+  const decelDur    = 2.0 + Math.random() * 0.4;    // ~2.0–2.4s fall
+  const phases      = ['accel', 'peak', 'decel'];
+  const startPhase  = phases[Math.floor(Math.random() * phases.length)];
+  const startDur    = startPhase === 'accel' ? accelDur
+                    : startPhase === 'peak'  ? peakDur
+                    :                          decelDur;
+  const startT      = Math.random() * startDur;
   // Compute starting rotationSpeed from phase position so the figure
   // doesn't pop into a new speed on its first frame.
-  const startRaw = Math.min(1, startT / (startPhase === 'accel' ? accelDur : decelDur));
-  const startK = startPhase === 'accel'
-    ? startRaw * startRaw * (3 - 2 * startRaw)
-    : 1 - Math.pow(1 - startRaw, 2.2);
-  const startSpeed = startPhase === 'accel'
+  const startRaw    = Math.min(1, startT / startDur);
+  const startK      = startPhase === 'accel'
+    ? (1 - Math.pow(1 - startRaw, 2.2))
+    : startPhase === 'peak'
+      ? 1
+      : (startRaw * 0.94 + Math.pow(startRaw, 1.6) * 0.06);
+  const startSpeed  = startPhase === 'accel'
     ? slowSpeed + (topSpeed - slowSpeed) * startK
-    : topSpeed - (topSpeed - slowSpeed) * startK;
+    : startPhase === 'peak'
+      ? topSpeed
+      : topSpeed - (topSpeed - slowSpeed) * startK;
   const dancer = {
     group: automaton,
     turntable, arms, heart, halo, jewel, headCore, eyes, mouth,
@@ -5632,6 +5712,7 @@ function buildWireDancer(cx, cy, cz){
       topSpeed,
       slowSpeed,
       accelDuration: accelDur,
+      peakDuration: peakDur,
       decelDuration: decelDur,
     },
     windStart: 0,
@@ -9580,6 +9661,7 @@ function loop(){
     updateAlert(dt);
     updateFlickerLights(dt);
     updateLobbyChandelier(dt);
+    updateLobbyCircle(dt);
     updateDualRealitySigns(dt);
     updateHiddenReveals(dt);
     updateCreepChair(dt);
