@@ -3322,11 +3322,13 @@ function triggerSubstationTrap(){
   showToast('CONTAINMENT ENGAGED', 'DNR Override Unit inbound.');
   setObjective('Survive the ambush. Disable the override unit.');
 
-  // Spawn a single ground-floor bot from the first elevator. The catwalk
-  // drone was too sneaky — players couldn't parse where the hits were
-  // coming from — so it's dropped entirely. The DNR Override Unit still
-  // arrives later from the third elevator.
-  setTimeout(()=> substationSpawnEnemy(trap.elevators[0], 'bot'), 900);
+  // Spawn the initial pair of enemies from elevators 0 and 1, staggered
+  // ~0.9s apart. The inspector spawner waits for BOTH to be killed
+  // (trap.inspectorAfterKills = 2), so this pair is required — otherwise
+  // the player gets stuck in the room with the bars still down and no
+  // inspector to progress the trap.
+  setTimeout(()=> substationSpawnEnemy(trap.elevators[0], 'bot'),   900);
+  setTimeout(()=> substationSpawnEnemy(trap.elevators[1], 'drone'), 1800);
 }
 
 function substationSpawnEnemy(elev, kind){
