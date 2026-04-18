@@ -632,6 +632,7 @@ involved knew.`,
   headshots:0,
   flickerLights:[],
   allCeilLights:[],
+  _lobbyChandelier: null,
   creepTimer: 8 + Math.random()*10,
   heartbeatTimer: 0,
   scares:{ shadowFigure:false, serverSpark:false, corridorLightsOut:false },
@@ -2910,6 +2911,385 @@ function decorateLobby(){
   addCeilLight(0, 4.2, 0, 0xbfe6c6, 1.2, 22);
   addCeilLight(-8, 4.2, 6, 0x8ee39c, 0.6, 10);
   addCeilLight(8, 4.2, 6, 0x8ee39c, 0.6, 10);
+  decorateLobbyCenterpiece();
+}
+
+// ============================================================
+// LOBBY CENTERPIECE — techno chandelier + obsidian pylons + floor
+// inlay + bronze wall relief. The chandelier hangs over the visitor
+// path north of the desk and is the room's first focal point. The
+// vibe is "corporate cathedral, switched on": cold neon glass, slow
+// counter-rotating rings, and an arrhythmic flicker that just barely
+// suggests something inside is breathing.
+// ============================================================
+function decorateLobbyCenterpiece(){
+  const cx = 0, cz = 4;     // centerpiece anchor (north of reception desk)
+  const ceilY = 4.2;        // matches addCeilLight height for the lobby
+
+  // ---- POLISHED FLOOR INLAY ----
+  // A black-marble disc with brass mandala etching sits flush with the
+  // floor under the chandelier. Slight emissive lift so it catches the
+  // chandelier glow without lighting the rest of the room.
+  const inlayMat = new THREE.MeshStandardMaterial({
+    map: makeLobbyFloorInlayTex(),
+    roughness: 0.28, metalness: 0.55,
+    emissive: 0x081416, emissiveIntensity: 0.35
+  });
+  const inlay = new THREE.Mesh(new THREE.CircleGeometry(3.6, 64), inlayMat);
+  inlay.rotation.x = -Math.PI/2;
+  inlay.position.set(cx, 0.022, cz);
+  scene.add(inlay);
+  // Thin raised brass rim around the inlay
+  const rimMat = new THREE.MeshStandardMaterial({
+    color:0xc9a548, metalness:0.95, roughness:0.18,
+    emissive:0x3a2a0a, emissiveIntensity:0.3
+  });
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.04, 8, 64), rimMat);
+  rim.rotation.x = Math.PI/2;
+  rim.position.set(cx, 0.04, cz);
+  scene.add(rim);
+
+  // ---- FLANKING PYLONS ----
+  // Two black-obsidian columns on either side of the inlay frame the
+  // chandelier and add verticality to the otherwise empty lobby.
+  const pylonMat = new THREE.MeshStandardMaterial({
+    color: 0x0c1014, metalness: 0.55, roughness: 0.22,
+    emissive: 0x040608, emissiveIntensity: 0.2
+  });
+  const pylonStripeMat = new THREE.MeshStandardMaterial({
+    color: 0x5ad7e6, transparent: true, opacity: 0.85,
+    emissive: 0x2a8a96, emissiveIntensity: 1.2
+  });
+  for(const px of [-5.2, 5.2]){
+    // Plinth
+    const plinth = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2, 0.18, 1.2),
+      new THREE.MeshStandardMaterial({color:0x1a2024, metalness:0.4, roughness:0.5}));
+    plinth.position.set(px, 0.09, cz); scene.add(plinth);
+    // Shaft (slightly tapered via a couple of stacked boxes)
+    const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.85, 3.3, 0.85), pylonMat);
+    shaft.position.set(px, 1.83, cz); scene.add(shaft);
+    // Vertical neon stripe inset on the inward face — the "techno"
+    // tell. Both pylons face the chandelier center.
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.08, 2.4, 0.06), pylonStripeMat);
+    stripe.position.set(px + (px < 0 ? 0.43 : -0.43), 1.85, cz);
+    scene.add(stripe);
+    // Capital
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.18, 1.0), pylonMat);
+    cap.position.set(px, 3.57, cz); scene.add(cap);
+    // A small cyan accent puck on top — feeds light up to the chandelier
+    const puck = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.18, 0.18, 0.05, 18),
+      new THREE.MeshBasicMaterial({color:0x9be8f0, transparent:true, opacity:0.9}));
+    puck.position.set(px, 3.7, cz); scene.add(puck);
+    const puckLight = new THREE.PointLight(0x5ad7e6, 0.35, 4.5);
+    puckLight.position.set(px, 3.85, cz); scene.add(puckLight);
+    // Collision so the player can't walk through the pylons
+    gs.walls.push({minX: px-0.45, maxX: px+0.45, minZ: cz-0.45, maxZ: cz+0.45});
+  }
+
+  // ---- WALL RELIEF (east wall, dressy plaque) ----
+  // Sits on the east interior wall facing west, opposite the player's
+  // approach. Catches the chandelier light beautifully on entry.
+  const reliefMat = new THREE.MeshStandardMaterial({
+    map: makeLobbyWallReliefTex(),
+    roughness: 0.45, metalness: 0.7,
+    emissive: 0x1a1208, emissiveIntensity: 0.18
+  });
+  const relief = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 2.1), reliefMat);
+  relief.position.set(11.94, 2.4, 4);
+  relief.rotation.y = -Math.PI/2;
+  scene.add(relief);
+  // Brass frame around the plaque — two thin bars top and bottom
+  const frameMat = new THREE.MeshStandardMaterial({
+    color:0xc9a548, metalness:0.95, roughness:0.2,
+    emissive:0x3a2a0a, emissiveIntensity:0.35
+  });
+  for(const fy of [3.5, 1.3]){
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 4.4), frameMat);
+    bar.position.set(11.97, fy, 4); scene.add(bar);
+  }
+  for(const fz of [4 - 2.15, 4 + 2.15]){
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(0.04, 2.3, 0.06), frameMat);
+    bar.position.set(11.97, 2.4, fz); scene.add(bar);
+  }
+  // Tiny warm wash so the plaque actually reads from across the room
+  const reliefWash = new THREE.PointLight(0xffd498, 0.6, 6);
+  reliefWash.position.set(10.6, 3.4, 4);
+  scene.add(reliefWash);
+
+  // ---- THE CHANDELIER ----
+  // Three counter-rotating rings of dark steel hung on four cables.
+  // Glass tubes at uneven lengths drop from the outer ring; each is a
+  // point light. A long crystal "tooth" hangs from the center.
+  const group = new THREE.Group();
+  group.position.set(cx, 0, cz);
+  scene.add(group);
+
+  const steelMat = new THREE.MeshStandardMaterial({
+    color:0x14181c, metalness:0.85, roughness:0.32,
+    emissive:0x05080a, emissiveIntensity:0.25
+  });
+  const cableMat = new THREE.MeshStandardMaterial({
+    color:0x0a0d10, metalness:0.7, roughness:0.5
+  });
+  const glassMat = new THREE.MeshStandardMaterial({
+    color:0x9be8f0, transparent:true, opacity:0.55,
+    emissive:0x5ad7e6, emissiveIntensity:1.6,
+    roughness:0.18, metalness:0.05
+  });
+
+  // ---- Suspension cables (4 from ceiling to crown hub) ----
+  const crownY = 3.45;
+  for(let i=0;i<4;i++){
+    const ang = (i/4) * Math.PI*2 + Math.PI/4;
+    const ax = Math.cos(ang)*0.7, az = Math.sin(ang)*0.7;
+    const cable = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018, 0.018, ceilY - crownY, 6), cableMat);
+    cable.position.set(ax, (ceilY + crownY)/2, az);
+    // Tilt slightly so cables converge toward the crown — gives a
+    // hanging-load read instead of perfectly parallel rods.
+    cable.rotation.z = -ax * 0.08;
+    cable.rotation.x =  az * 0.08;
+    group.add(cable);
+  }
+  // Crown hub
+  const crownHub = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.32, 0.45, 0.18, 16), steelMat);
+  crownHub.position.set(0, crownY, 0); group.add(crownHub);
+  // Brass collar around the hub
+  const collar = new THREE.Mesh(
+    new THREE.TorusGeometry(0.46, 0.025, 8, 32), rimMat);
+  collar.position.set(0, crownY - 0.05, 0); collar.rotation.x = Math.PI/2;
+  group.add(collar);
+
+  // ---- Outer ring ----
+  const outerY = 2.95;
+  const outerRing = new THREE.Group();
+  outerRing.position.set(0, outerY, 0);
+  group.add(outerRing);
+  const outerTorus = new THREE.Mesh(
+    new THREE.TorusGeometry(1.55, 0.05, 10, 48), steelMat);
+  outerTorus.rotation.x = Math.PI/2;
+  outerRing.add(outerTorus);
+  // Inner brass trim on the outer ring (thin glow line)
+  const outerTrim = new THREE.Mesh(
+    new THREE.TorusGeometry(1.40, 0.012, 6, 48),
+    new THREE.MeshStandardMaterial({color:0xc9a548, metalness:0.9, roughness:0.2,
+      emissive:0xa86a1a, emissiveIntensity:0.6}));
+  outerTrim.rotation.x = Math.PI/2;
+  outerRing.add(outerTrim);
+  // Six radial spokes from crown to outer ring (suspension)
+  for(let i=0;i<6;i++){
+    const ang = (i/6)*Math.PI*2;
+    const sx = Math.cos(ang)*1.55, sz = Math.sin(ang)*1.55;
+    const spokeLen = Math.hypot(1.55, crownY - outerY);
+    const spoke = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.012, 0.012, spokeLen, 6), cableMat);
+    // Position midpoint between crown(0,crownY,0) and ring(sx,outerY,sz)
+    spoke.position.set(sx/2, (crownY + outerY)/2, sz/2);
+    // Aim down the spoke vector
+    const dir = new THREE.Vector3(sx, outerY - crownY, sz).normalize();
+    const up = new THREE.Vector3(0,1,0);
+    spoke.quaternion.setFromUnitVectors(up, dir);
+    group.add(spoke);
+  }
+
+  // ---- Inner ring (counter-rotates) ----
+  const innerY = 2.55;
+  const innerRing = new THREE.Group();
+  innerRing.position.set(0, innerY, 0);
+  group.add(innerRing);
+  const innerTorus = new THREE.Mesh(
+    new THREE.TorusGeometry(0.82, 0.04, 8, 36), steelMat);
+  innerTorus.rotation.x = Math.PI/2;
+  innerRing.add(innerTorus);
+  const innerTrim = new THREE.Mesh(
+    new THREE.TorusGeometry(0.7, 0.01, 6, 36),
+    new THREE.MeshStandardMaterial({color:0x9be8f0, metalness:0.6, roughness:0.2,
+      emissive:0x5ad7e6, emissiveIntensity:1.2,
+      transparent:true, opacity:0.9}));
+  innerTrim.rotation.x = Math.PI/2;
+  innerRing.add(innerTrim);
+
+  // ---- Glass tube pendants on the outer ring ----
+  // Eight pendants at uneven lengths — the unevenness is the creep.
+  const orbs = [];
+  const tubes = [];
+  const pointLights = [];
+  const lengths = [0.55, 0.95, 0.7, 1.15, 0.6, 0.85, 1.0, 0.75];
+  for(let i=0;i<8;i++){
+    const ang = (i/8)*Math.PI*2;
+    const px = Math.cos(ang)*1.55, pz = Math.sin(ang)*1.55;
+    const L = lengths[i];
+    // Glass tube
+    const tube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.045, 0.035, L, 10), glassMat.clone());
+    tube.position.set(px, outerY - L/2 - 0.04, pz);
+    // Light tilt for menace — 3-4 degrees off vertical
+    tube.rotation.z = (i%3 - 1) * 0.04;
+    tube.rotation.x = ((i+1)%3 - 1) * 0.03;
+    outerRing.add(tube);
+    tubes.push(tube);
+    // Glow orb at the bottom of each tube
+    const orb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.085, 14, 10),
+      new THREE.MeshBasicMaterial({color:0x9be8f0}));
+    orb.position.set(px, outerY - L - 0.08, pz);
+    outerRing.add(orb);
+    orbs.push(orb);
+    // Point light at the orb
+    const pl = new THREE.PointLight(0x6ad9e6, 0.55, 9);
+    pl.position.set(px, outerY - L - 0.08, pz);
+    outerRing.add(pl);
+    pointLights.push(pl);
+  }
+
+  // ---- Inner ring smaller pendants (4) ----
+  for(let i=0;i<4;i++){
+    const ang = (i/4)*Math.PI*2 + Math.PI/4;
+    const px = Math.cos(ang)*0.82, pz = Math.sin(ang)*0.82;
+    const L = 0.35 + Math.random()*0.25;
+    const tube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.025, L, 10),
+      new THREE.MeshStandardMaterial({
+        color:0xd4b8ff, transparent:true, opacity:0.55,
+        emissive:0xa680ff, emissiveIntensity:1.2,
+        roughness:0.2, metalness:0.05
+      }));
+    tube.position.set(px, innerY - L/2 - 0.03, pz);
+    innerRing.add(tube);
+    tubes.push(tube);
+    const orb = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 12, 10),
+      new THREE.MeshBasicMaterial({color:0xd4b8ff}));
+    orb.position.set(px, innerY - L - 0.06, pz);
+    innerRing.add(orb);
+    orbs.push(orb);
+    const pl = new THREE.PointLight(0xb088ff, 0.32, 6);
+    pl.position.set(px, innerY - L - 0.06, pz);
+    innerRing.add(pl);
+    pointLights.push(pl);
+  }
+
+  // ---- Central crystal "tooth" ----
+  // A long tapered pendant hanging well below the rings — the part of
+  // the chandelier that should not be there. Cold sickly green.
+  const toothMat = new THREE.MeshStandardMaterial({
+    color:0xb8f0c4, transparent:true, opacity:0.6,
+    emissive:0x44b070, emissiveIntensity:1.4,
+    roughness:0.2, metalness:0.05
+  });
+  const tooth = new THREE.Mesh(
+    new THREE.ConeGeometry(0.18, 1.6, 8), toothMat);
+  // Cone apex points down by default if we flip it
+  tooth.position.set(0, 1.6, 0);
+  tooth.rotation.x = Math.PI;   // apex down
+  group.add(tooth);
+  const toothLight = new THREE.PointLight(0x6fe89a, 0.55, 7);
+  toothLight.position.set(0, 1.4, 0); group.add(toothLight);
+  // Halo collar where the tooth meets the inner ring — sells the join
+  const toothCollar = new THREE.Mesh(
+    new THREE.TorusGeometry(0.18, 0.025, 8, 24), rimMat);
+  toothCollar.position.set(0, 2.35, 0);
+  toothCollar.rotation.x = Math.PI/2;
+  group.add(toothCollar);
+
+  // ---- Lower halo ring ----
+  // A wide thin ring well below the rest, with no pendants, just a
+  // glowing loop suspended in space. Sells "techno" hard.
+  const haloRing = new THREE.Group();
+  haloRing.position.set(0, 1.85, 0);
+  group.add(haloRing);
+  const haloTorus = new THREE.Mesh(
+    new THREE.TorusGeometry(2.05, 0.018, 6, 64),
+    new THREE.MeshStandardMaterial({
+      color:0x9be8f0, transparent:true, opacity:0.85,
+      emissive:0x5ad7e6, emissiveIntensity:1.5
+    }));
+  haloTorus.rotation.x = Math.PI/2;
+  haloRing.add(haloTorus);
+  // Three thin support wires from the inner ring down to the halo
+  for(let i=0;i<3;i++){
+    const ang = (i/3)*Math.PI*2;
+    const sx = Math.cos(ang)*0.8, sz = Math.sin(ang)*0.8;
+    const ex = Math.cos(ang)*2.05, ez = Math.sin(ang)*2.05;
+    const len = Math.hypot(ex-sx, ez-sz, innerY - 1.85);
+    const wire = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, len, 6), cableMat);
+    wire.position.set((sx+ex)/2, (innerY + 1.85)/2, (sz+ez)/2);
+    const dir = new THREE.Vector3(ex-sx, 1.85 - innerY, ez-sz).normalize();
+    wire.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+    group.add(wire);
+  }
+
+  // Store base intensities so the updater can scale them.
+  const basePtIntensities = pointLights.map(p => p.intensity);
+  const baseToothInt = toothLight.intensity;
+
+  gs._lobbyChandelier = {
+    group, outerRing, innerRing, haloRing,
+    orbs, tubes, pointLights, basePtIntensities,
+    tooth, toothLight, baseToothInt,
+    haloTorus, innerTrim, outerTrim,
+    t: Math.random()*10,
+    nextTwitch: 3 + Math.random()*4
+  };
+}
+
+// Slow counter-rotation, arrhythmic per-orb flicker, occasional whole-
+// fixture brown-out. Runs every frame while the player is in the lobby
+// area or anywhere with line-of-sight (cheap enough to always update).
+function updateLobbyChandelier(dt){
+  const c = gs._lobbyChandelier;
+  if(!c) return;
+  c.t += dt;
+  // Slow counter-rotation — almost imperceptible until you watch it
+  c.outerRing.rotation.y += dt * 0.12;
+  c.innerRing.rotation.y -= dt * 0.21;
+  c.haloRing.rotation.y += dt * 0.06;
+
+  // Per-pendant arrhythmic flicker. We blend two slow sines with a
+  // sharper noise term so no two orbs phase up together.
+  for(let i=0;i<c.pointLights.length;i++){
+    const phase = i * 1.37;
+    const slow = 0.85 + 0.15 * Math.sin(c.t * 0.6 + phase);
+    const fast = 0.10 * Math.sin(c.t * 4.3 + phase * 2.1) * Math.cos(c.t * 1.7 + phase);
+    let mult = slow + fast;
+    // Sharp dropouts ~1% of frames per orb
+    if(Math.sin(c.t * 7.1 + phase * 4.7) > 0.985) mult *= 0.18;
+    c.pointLights[i].intensity = c.basePtIntensities[i] * mult;
+    const orbMat = c.orbs[i].material;
+    if(orbMat && orbMat.color){
+      // Pulse the orb's apparent brightness via opacity-like scaling on
+      // its plain MeshBasicMaterial: just nudge the tube's emissive too.
+    }
+    const tubeMat = c.tubes[i] && c.tubes[i].material;
+    if(tubeMat && tubeMat.emissiveIntensity !== undefined){
+      tubeMat.emissiveIntensity = 1.0 + 0.6 * mult;
+    }
+  }
+
+  // Central tooth: slow ominous breath, longer cycle than the orbs
+  const breath = 0.8 + 0.25 * Math.sin(c.t * 0.35);
+  c.toothLight.intensity = c.baseToothInt * breath;
+  c.tooth.material.emissiveIntensity = 1.1 + 0.5 * breath;
+
+  // Halo torus subtle pulse
+  c.haloTorus.material.emissiveIntensity = 1.1 + 0.5 * Math.sin(c.t * 0.9);
+  c.innerTrim.material.emissiveIntensity = 0.9 + 0.4 * Math.sin(c.t * 1.3 + 1);
+  c.outerTrim.material.emissiveIntensity = 0.45 + 0.25 * Math.sin(c.t * 0.7 + 2);
+
+  // Occasional whole-fixture twitch — the lights all sag for ~120ms,
+  // then snap back. Re-armed with a random delay so you can never
+  // predict when it'll happen.
+  c.nextTwitch -= dt;
+  if(c.nextTwitch <= 0){
+    for(let i=0;i<c.pointLights.length;i++) c.pointLights[i].intensity *= 0.15;
+    c.toothLight.intensity *= 0.25;
+    c.nextTwitch = 6 + Math.random()*9;
+  }
 }
 function decorateServerHall(){
   const rackMat = new THREE.MeshStandardMaterial({color:0x0f1a14, roughness:0.5, metalness:0.7});
@@ -3139,6 +3519,162 @@ function makeDroneTex(){
   _cachedDroneTex = new THREE.CanvasTexture(c);
   _cachedDroneTex.wrapS = THREE.RepeatWrapping;
   return _cachedDroneTex;
+}
+
+// Floor inlay under the lobby chandelier — black polished stone disc with a
+// brass mandala / circuit pattern etched into it. Caches the canvas texture
+// so we don't repaint it on every reload.
+let _cachedLobbyInlay = null;
+function makeLobbyFloorInlayTex(){
+  if(_cachedLobbyInlay) return _cachedLobbyInlay;
+  const c = document.createElement('canvas'); c.width=512; c.height=512;
+  const g = c.getContext('2d');
+  // Polished black stone backdrop with subtle radial sheen
+  const bg = g.createRadialGradient(256,256,8, 256,256,256);
+  bg.addColorStop(0, '#10171a');
+  bg.addColorStop(0.55,'#070a0c');
+  bg.addColorStop(1, '#020304');
+  g.fillStyle = bg; g.fillRect(0,0,512,512);
+  // Faint marble veining
+  g.strokeStyle = 'rgba(120,140,160,0.05)';
+  g.lineWidth = 1;
+  for(let i=0;i<22;i++){
+    g.beginPath();
+    let x=Math.random()*512, y=Math.random()*512;
+    g.moveTo(x,y);
+    for(let s=0;s<8;s++){
+      x += (Math.random()-0.5)*60;
+      y += (Math.random()-0.5)*60;
+      g.lineTo(x,y);
+    }
+    g.stroke();
+  }
+  // Concentric brass rings
+  g.translate(256,256);
+  for(const r of [240, 210, 178, 100, 64, 30]){
+    g.strokeStyle = '#a88a3a';
+    g.lineWidth = r === 240 || r === 100 ? 3 : 1.2;
+    g.globalAlpha = 0.85;
+    g.beginPath(); g.arc(0,0,r,0,Math.PI*2); g.stroke();
+  }
+  // Cyan inner halo (techno bleed)
+  g.strokeStyle = '#5ad7e6';
+  g.lineWidth = 1.4;
+  g.globalAlpha = 0.55;
+  g.beginPath(); g.arc(0,0,148,0,Math.PI*2); g.stroke();
+  g.globalAlpha = 1;
+  // Twelve radial spokes with little circuit nodes
+  for(let i=0;i<12;i++){
+    g.save();
+    g.rotate((i/12) * Math.PI*2);
+    g.strokeStyle = '#7a6428';
+    g.lineWidth = 1.2;
+    g.beginPath(); g.moveTo(64,0); g.lineTo(210,0); g.stroke();
+    // Node bumps along the spoke
+    for(const nx of [110, 150, 190]){
+      g.fillStyle = '#c9a548';
+      g.beginPath(); g.arc(nx,0,2.4,0,Math.PI*2); g.fill();
+      g.fillStyle = 'rgba(90,215,230,0.85)';
+      g.beginPath(); g.arc(nx,0,1.1,0,Math.PI*2); g.fill();
+    }
+    // Small glyph at the rim
+    g.fillStyle = '#a88a3a';
+    g.font = 'bold 14px "Courier New", monospace';
+    g.textAlign='left'; g.textBaseline='middle';
+    g.fillText(['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'][i], 218, 0);
+    g.restore();
+  }
+  // Inner six-petal mandala
+  g.strokeStyle = '#a88a3a';
+  g.lineWidth = 1.6;
+  for(let i=0;i<6;i++){
+    g.save();
+    g.rotate((i/6)*Math.PI*2);
+    g.beginPath();
+    g.arc(50,0,50,Math.PI/2,3*Math.PI/2);
+    g.stroke();
+    g.restore();
+  }
+  // Center sigil — eye-like ring
+  g.strokeStyle = '#5ad7e6';
+  g.lineWidth = 1.8;
+  g.beginPath(); g.arc(0,0,18,0,Math.PI*2); g.stroke();
+  g.fillStyle = '#0a1518';
+  g.beginPath(); g.arc(0,0,12,0,Math.PI*2); g.fill();
+  g.fillStyle = '#c9a548';
+  g.beginPath(); g.arc(0,0,4,0,Math.PI*2); g.fill();
+  // Hairline crackle around the rim — a touch of decay
+  g.strokeStyle = 'rgba(255,255,255,0.06)';
+  g.lineWidth = 0.6;
+  for(let i=0;i<24;i++){
+    const a = Math.random()*Math.PI*2;
+    g.beginPath();
+    g.moveTo(Math.cos(a)*235, Math.sin(a)*235);
+    g.lineTo(Math.cos(a)*255, Math.sin(a)*255);
+    g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  _cachedLobbyInlay = tex;
+  return tex;
+}
+
+// Wall relief plaque for the lobby — etched brass on dark verdigris panel
+// with the (cover) corporate motto. Reads at a glance, sells "this is a
+// real building."
+let _cachedLobbyRelief = null;
+function makeLobbyWallReliefTex(){
+  if(_cachedLobbyRelief) return _cachedLobbyRelief;
+  const c = document.createElement('canvas'); c.width=512; c.height=256;
+  const g = c.getContext('2d');
+  // Verdigris bronze base
+  const bg = g.createLinearGradient(0,0,0,256);
+  bg.addColorStop(0,'#1c2a26');
+  bg.addColorStop(1,'#0e1614');
+  g.fillStyle = bg; g.fillRect(0,0,512,256);
+  // Patina speckle
+  for(let i=0;i<2400;i++){
+    g.fillStyle = `rgba(${80+Math.random()*60},${110+Math.random()*70},${90+Math.random()*40},${Math.random()*0.18})`;
+    g.fillRect(Math.random()*512, Math.random()*256, 1.4, 1.4);
+  }
+  // Brass border (inner double-line)
+  g.strokeStyle = '#c9a548';
+  g.lineWidth = 4; g.strokeRect(10,10,492,236);
+  g.lineWidth = 1.2; g.strokeRect(20,20,472,216);
+  // Title
+  g.fillStyle = '#e8c46a';
+  g.font = 'bold 38px "Times New Roman", serif';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 4; g.shadowOffsetY = 2;
+  g.fillText('OLAM HOLDINGS 1', 256, 64);
+  g.shadowBlur = 0; g.shadowOffsetY = 0;
+  // Sub-line
+  g.fillStyle = '#a88a3a';
+  g.font = '18px "Times New Roman", serif';
+  g.fillText('— EST. MMXXIII —', 256, 100);
+  // Three-line inscription
+  g.fillStyle = '#9bb0a4';
+  g.font = '15px "Courier New", monospace';
+  const lines = [
+    'EFFICIENCY.  STEWARDSHIP.  LIGHT.',
+    'WE BUILD WHERE THE LAND PERMITS,',
+    'WE OPERATE WHERE THE GRID ALLOWS.'
+  ];
+  lines.forEach((ln, i)=>g.fillText(ln, 256, 142 + i*22));
+  // Tiny brass seal in the corner
+  g.fillStyle = '#c9a548';
+  g.beginPath(); g.arc(50, 210, 18, 0, Math.PI*2); g.fill();
+  g.fillStyle = '#0e1614';
+  g.font = 'bold 11px monospace'; g.fillText('OH', 50, 211);
+  // Mirror on the other corner
+  g.fillStyle = '#c9a548';
+  g.beginPath(); g.arc(462, 210, 18, 0, Math.PI*2); g.fill();
+  g.fillStyle = '#0e1614';
+  g.fillText('1', 462, 211);
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  _cachedLobbyRelief = tex;
+  return tex;
 }
 
 let _cachedRackLED = null;
@@ -8943,6 +9479,7 @@ function loop(){
     updateToast(dt);
     updateAlert(dt);
     updateFlickerLights(dt);
+    updateLobbyChandelier(dt);
     updateDualRealitySigns(dt);
     updateHiddenReveals(dt);
     updateCreepChair(dt);
