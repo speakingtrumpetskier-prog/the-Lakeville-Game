@@ -1610,16 +1610,58 @@ function buildLevel(){
   addRoom('Corr N', 0,16, 6,8);
   addRoom('Corr F', 0, 50, 6, 12);
 
-  // Lobby ceiling is 10.5m up — far enough from lamp range that without
-  // self-emission it reads as "odd black top." A dim emissive warms the
-  // cathedral vault so the raised height is legible from the floor.
-  // Boosted ~30% (0.45 → 0.6 intensity, color slightly warmer) from the
-  // 9m-ceiling tuning to match the taller room.
+  // Lobby ceiling is 10.5m up and the shared dark-tile ceil texture
+  // disappears completely at that height — the previous emissive-only
+  // fix just made the dark texture glow a bit. Now the lobby uses its
+  // own coffered-panel texture (see makeLobbyCeilTex) with real mid-
+  // tone values + brass rosettes at each coffer center, plus a warm
+  // emissive lift so the whole vault reads as lit from the inside.
+  // Coffer beam geometry is added below for physical depth.
   if(lobbyRoom && lobbyRoom.ceil){
-    const lobbyCeilMat = lobbyRoom.ceil.material.clone();
-    lobbyCeilMat.emissive = new THREE.Color(0x243828);
-    lobbyCeilMat.emissiveIntensity = 0.6;
+    const lobbyCeilMat = new THREE.MeshStandardMaterial({
+      map: makeLobbyCeilTex(),
+      roughness: 0.7, metalness: 0.15,
+      emissive: new THREE.Color(0x3d5a48),
+      emissiveIntensity: 0.75
+    });
     lobbyRoom.ceil.material = lobbyCeilMat;
+    // Coffer beams — real 3D cross-ribs below the ceiling so the player
+    // can see structure from the floor. A 4-bay grid: 5 beams in each
+    // axis at x/z = -11.9, -5.95, 0, 5.95, 11.9. Each beam is a slim
+    // box hanging 0.35m below the ceiling. Dark bronze material with a
+    // small warm emissive so they catch the chandelier light.
+    const beamMat = new THREE.MeshStandardMaterial({
+      color: 0x1a2520, roughness: 0.55, metalness: 0.55,
+      emissive: 0x0c120e, emissiveIntensity: 0.35
+    });
+    const beamY = 10.25;   // center; 0.3m tall → spans 10.1..10.4
+    const beamPositions = [-11.9, -5.95, 0, 5.95, 11.9];
+    // X-axis beams (run along x, span z through the grid line)
+    for(const bz of beamPositions){
+      const bm = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.3, 0.32), beamMat);
+      bm.position.set(0, beamY, bz);
+      scene.add(bm);
+    }
+    // Z-axis beams (run along z)
+    for(const bx of beamPositions){
+      const bm = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 23.8), beamMat);
+      bm.position.set(bx, beamY, 0);
+      scene.add(bm);
+    }
+    // Small brass bosses at beam intersections — decorative medallions
+    // the player can actually see from the floor.
+    const bossMat = new THREE.MeshStandardMaterial({
+      color: 0xc9a548, metalness: 0.9, roughness: 0.25,
+      emissive: 0x3a2a0a, emissiveIntensity: 0.45
+    });
+    for(const bx of beamPositions){
+      for(const bz of beamPositions){
+        const boss = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.26, 0.22, 0.12, 20), bossMat);
+        boss.position.set(bx, 10.06, bz);   // underside of the beam
+        scene.add(boss);
+      }
+    }
   }
 
   // Lobby walls with gaps toward corridors. South wall is SEALED — the
@@ -2779,6 +2821,82 @@ function makeTileCeilTex(){
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(3, 3);
   tex.anisotropy = 4;
+  return tex;
+}
+
+// Lobby-specific ceiling texture. The shared makeTileCeilTex above is
+// painted near-black (tile rgb ~14–26) which reads fine at 4.4m in a
+// corridor but disappears at 10.5m in the cathedral lobby — the only
+// visible bits are the ~3 spots lit directly by point lights. This
+// ceiling needs to be legibly brighter and have real coffered structure
+// so the player can see what's up there from the floor.
+function makeLobbyCeilTex(){
+  const size = 1024;
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const g = c.getContext('2d');
+  // Dark bronze/green base (this is the beam color between panels).
+  g.fillStyle = '#1a251e';
+  g.fillRect(0, 0, size, size);
+  // 4×4 coffered panels. Each panel is a raised-looking rectangle of
+  // warm mid-green, with an inset border suggested by a darker rim.
+  const cells = 4;
+  const cell = size / cells;
+  for(let ty = 0; ty < cells; ty++){
+    for(let tx = 0; tx < cells; tx++){
+      const px = tx * cell, py = ty * cell;
+      // Outer beam gap (keep ~14% of the cell as beam)
+      const beam = cell * 0.14;
+      const innerX = px + beam, innerY = py + beam;
+      const innerS = cell - 2*beam;
+      // Panel gradient — brighter at the center, darker at edges so
+      // the coffer reads as recessed.
+      const grad = g.createRadialGradient(
+        innerX + innerS/2, innerY + innerS/2, innerS*0.1,
+        innerX + innerS/2, innerY + innerS/2, innerS*0.72
+      );
+      grad.addColorStop(0, '#65826f');    // panel center — visibly green
+      grad.addColorStop(0.65, '#4a624f');
+      grad.addColorStop(1, '#2d3a31');    // panel edge — darker
+      g.fillStyle = grad;
+      g.fillRect(innerX, innerY, innerS, innerS);
+      // Inner shadow line along the top + left edge of the panel to
+      // fake the inset look.
+      g.fillStyle = 'rgba(10,16,12,0.55)';
+      g.fillRect(innerX, innerY, innerS, 3);
+      g.fillRect(innerX, innerY, 3, innerS);
+      // Inner highlight along bottom + right for the lift.
+      g.fillStyle = 'rgba(180,210,186,0.18)';
+      g.fillRect(innerX, innerY + innerS - 2, innerS, 2);
+      g.fillRect(innerX + innerS - 2, innerY, 2, innerS);
+      // Small brass rosette at panel center
+      const cx = innerX + innerS/2, cy = innerY + innerS/2;
+      const rosR = innerS * 0.08;
+      const rosGrad = g.createRadialGradient(cx, cy, 0, cx, cy, rosR);
+      rosGrad.addColorStop(0, '#d6b86a');
+      rosGrad.addColorStop(0.6, '#9a7e3a');
+      rosGrad.addColorStop(1, 'rgba(154,126,58,0)');
+      g.fillStyle = rosGrad;
+      g.beginPath(); g.arc(cx, cy, rosR, 0, Math.PI*2); g.fill();
+      // Tiny center dot
+      g.fillStyle = '#f1d58a';
+      g.beginPath(); g.arc(cx, cy, rosR*0.28, 0, Math.PI*2); g.fill();
+    }
+  }
+  // Cross-beam highlights — brass trim stripe down the center of
+  // every beam so the grid reads even at a distance.
+  g.strokeStyle = 'rgba(192,156,84,0.55)';
+  g.lineWidth = 2;
+  for(let i = 0; i <= cells; i++){
+    const p = i * cell;
+    g.beginPath(); g.moveTo(p, 0); g.lineTo(p, size); g.stroke();
+    g.beginPath(); g.moveTo(0, p); g.lineTo(size, p); g.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  // One repeat → 1024px maps across the full 23.8×23.8 ceiling. Coffers
+  // end up ~6m square each, which reads as four large panels per side.
+  tex.repeat.set(1, 1);
+  tex.anisotropy = 8;
   return tex;
 }
 
@@ -9483,14 +9601,14 @@ function animateMenuCanvas(){
       hall,
       t: phase,              // position along the roof, 0..1
       dir: Math.random() < 0.5 ? 1 : -1,
-      // Walkers now move at 30% of their previous pace — reads as a
-      // slower, more deliberate patrol. speed + gait both scaled so
-      // the step cadence stays proportional to the forward motion.
-      speed: (0.0011 + Math.random()*0.0006) * 0.3,
+      // Walkers pace at 36% of their original speed (20% faster than
+      // the previous 30% tuning). speed + gait both scaled together
+      // so step cadence stays proportional to the forward motion.
+      speed: (0.0011 + Math.random()*0.0006) * 0.36,
       height: 0.030 + Math.random()*0.006,
       width: 0.006 + Math.random()*0.002,
       phase: Math.random()*Math.PI*2,
-      gait: (0.10 + Math.random()*0.03) * 0.3,
+      gait: (0.10 + Math.random()*0.03) * 0.36,
       stutter: 0,
       pauseChance: 0.0008
     });
