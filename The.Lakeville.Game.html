@@ -1543,7 +1543,14 @@ function buildLevel(){
   const ceilTex  = makeTileCeilTex();
   const floorMat = new THREE.MeshStandardMaterial({map:floorTex, roughness:0.55, metalness:0.25});
   const wallMat  = new THREE.MeshStandardMaterial({map:wallTex,  roughness:0.65, metalness:0.3});
-  const ceilMat  = new THREE.MeshStandardMaterial({map:ceilTex,  roughness:0.9,  metalness:0.05});
+  // Shared ceiling material now has a small self-emissive so every
+  // room's ceiling reads from below even outside the point-light
+  // pool. Previously only the patch directly under each fixture was
+  // visible — the rest of every ceiling looked like flat black.
+  const ceilMat  = new THREE.MeshStandardMaterial({
+    map: ceilTex, roughness: 0.9, metalness: 0.05,
+    emissive: 0x1a2520, emissiveIntensity: 0.3
+  });
 
   function addRoom(name, x, z, w, d, ceilingY=4.4, ceilInset=0.1){
     const floor = new THREE.Mesh(new THREE.BoxGeometry(w, 0.2, d), floorMat);
@@ -2767,13 +2774,17 @@ function makeTileCeilTex(){
   const size = 512;
   const c = document.createElement('canvas'); c.width=c.height=size;
   const g = c.getContext('2d');
-  g.fillStyle = '#0e1612'; g.fillRect(0,0,size,size);
+  // Brightened ~3x over the previous tuning. The old values (rgb 14-26)
+  // read as near-black from any distance further than a fixture, which
+  // meant the ceiling looked like flat darkness from most viewing
+  // angles. New base tile rgb 48-68 is still dim, but legibly textured.
+  g.fillStyle = '#24302a'; g.fillRect(0,0,size,size);
   // 4x4 tiles
   const t = size/4;
   for(let ty=0; ty<4; ty++){
     for(let tx=0; tx<4; tx++){
-      const v = 14 + Math.random()*12;
-      g.fillStyle = `rgb(${v},${v+2},${v})`;
+      const v = 48 + Math.random()*20;
+      g.fillStyle = `rgb(${v},${v+4},${v+2})`;
       g.fillRect(tx*t+2, ty*t+2, t-4, t-4);
       // Pinprick perforations
       for(let i=0;i<28;i++){
@@ -2786,14 +2797,14 @@ function makeTileCeilTex(){
         const sy = ty*t + t/2 + (Math.random()-0.5)*20;
         const sr = 20 + Math.random()*22;
         const rad = g.createRadialGradient(sx,sy,0, sx,sy,sr);
-        rad.addColorStop(0, 'rgba(60,48,30,0.5)');
-        rad.addColorStop(1, 'rgba(60,48,30,0)');
+        rad.addColorStop(0, 'rgba(88,70,44,0.5)');
+        rad.addColorStop(1, 'rgba(88,70,44,0)');
         g.fillStyle = rad; g.fillRect(sx-sr, sy-sr, sr*2, sr*2);
       }
     }
   }
-  // T-grid
-  g.fillStyle = '#394a44';
+  // T-grid — also lightened so the tile boundaries read
+  g.fillStyle = '#5a6f65';
   for(let i=0; i<=4; i++){
     g.fillRect(i*t-2, 0, 4, size);
     g.fillRect(0, i*t-2, size, 4);
