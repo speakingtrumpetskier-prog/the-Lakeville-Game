@@ -1614,55 +1614,58 @@ function buildLevel(){
   addRoom('Corr N', 0,16, 6,8);
   addRoom('Corr F', 0, 50, 6, 12);
 
-  // Lobby ceiling is 10.5m up and the shared dark-tile ceil texture
-  // disappears completely at that height — the previous emissive-only
-  // fix just made the dark texture glow a bit. Now the lobby uses its
-  // own coffered-panel texture (see makeLobbyCeilTex) with real mid-
-  // tone values + brass rosettes at each coffer center, plus a warm
-  // emissive lift so the whole vault reads as lit from the inside.
-  // Coffer beam geometry is added below for physical depth.
+  // Lobby ceiling is 10.5m up and the earlier iterations (dark tiles,
+  // then dark bronze beams hanging below) both read from the floor as
+  // "flat black top." The previous dark beams were literally forming a
+  // 23.8m-long near-black grid 0.35m under the coffer texture, which
+  // was exactly the "artificial black top" the player was seeing.
+  //
+  // New approach: ceiling is unambiguously LIT with a strong green
+  // emissive + the coffered texture; NO dark beam grid blocking it.
+  // Decorative brass medallions + brass beam *trim* strips are kept
+  // (they're visible highlights, not dark masses). The coffered
+  // texture itself carries the panel-and-beam look.
   if(lobbyRoom && lobbyRoom.ceil){
     const lobbyCeilMat = new THREE.MeshStandardMaterial({
       map: makeLobbyCeilTex(),
-      roughness: 0.7, metalness: 0.15,
-      emissive: new THREE.Color(0x3d5a48),
-      emissiveIntensity: 0.75
+      roughness: 0.6, metalness: 0.2,
+      emissive: new THREE.Color(0x4a7a5c),
+      emissiveIntensity: 1.6
     });
     lobbyRoom.ceil.material = lobbyCeilMat;
-    // Coffer beams — real 3D cross-ribs below the ceiling so the player
-    // can see structure from the floor. A 4-bay grid: 5 beams in each
-    // axis at x/z = -11.9, -5.95, 0, 5.95, 11.9. Each beam is a slim
-    // box hanging 0.35m below the ceiling. Dark bronze material with a
-    // small warm emissive so they catch the chandelier light.
-    const beamMat = new THREE.MeshStandardMaterial({
-      color: 0x1a2520, roughness: 0.55, metalness: 0.55,
-      emissive: 0x0c120e, emissiveIntensity: 0.35
+    // Brass trim ribbons along the coffer beam lines — thin, bright,
+    // and self-emissive so they read as decorative metalwork on the
+    // ceiling instead of dark structural beams occluding the view.
+    // Hung 0.12m below the ceiling bottom (y=10.28) with tiny thickness
+    // so at any viewing angle they occupy almost no vertical extent of
+    // the view and never read as a "black top."
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: 0xc9a548, metalness: 0.95, roughness: 0.22,
+      emissive: 0x8a6820, emissiveIntensity: 1.0
     });
-    const beamY = 10.25;   // center; 0.3m tall → spans 10.1..10.4
-    const beamPositions = [-11.9, -5.95, 0, 5.95, 11.9];
-    // X-axis beams (run along x, span z through the grid line)
-    for(const bz of beamPositions){
-      const bm = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.3, 0.32), beamMat);
-      bm.position.set(0, beamY, bz);
+    const trimY = 10.33;
+    const trimPositions = [-11.9, -5.95, 0, 5.95, 11.9];
+    for(const bz of trimPositions){
+      const bm = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.04, 0.08), trimMat);
+      bm.position.set(0, trimY, bz);
       scene.add(bm);
     }
-    // Z-axis beams (run along z)
-    for(const bx of beamPositions){
-      const bm = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.3, 23.8), beamMat);
-      bm.position.set(bx, beamY, 0);
+    for(const bx of trimPositions){
+      const bm = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 23.8), trimMat);
+      bm.position.set(bx, trimY, 0);
       scene.add(bm);
     }
-    // Small brass bosses at beam intersections — decorative medallions
-    // the player can actually see from the floor.
+    // Brass bosses at each intersection — visible medallions that
+    // double as soft warm spotlights.
     const bossMat = new THREE.MeshStandardMaterial({
-      color: 0xc9a548, metalness: 0.9, roughness: 0.25,
-      emissive: 0x3a2a0a, emissiveIntensity: 0.45
+      color: 0xf5d078, metalness: 0.9, roughness: 0.25,
+      emissive: 0xa87830, emissiveIntensity: 1.2
     });
-    for(const bx of beamPositions){
-      for(const bz of beamPositions){
+    for(const bx of trimPositions){
+      for(const bz of trimPositions){
         const boss = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.26, 0.22, 0.12, 20), bossMat);
-        boss.position.set(bx, 10.06, bz);   // underside of the beam
+          new THREE.CylinderGeometry(0.3, 0.24, 0.1, 20), bossMat);
+        boss.position.set(bx, 10.28, bz);
         scene.add(boss);
       }
     }
@@ -3716,22 +3719,10 @@ function decorateServerHall(){
   addWallWriting(40, 3.7, -12.79, 0,
     'from up here you can see\nevery rack.\nfrom up here you can\ncount the MW.',
     {color:'#aee3ff', width:4.0});
-  // And a hidden fragment only reachable via catwalk (east end of walkway,
-  // separated from the main pedestal which now sits at catwalk center).
-  addHiddenFragment(48, 3.25, 0, 'grid',
-    'Engineering File — Summary Nameplate',
-`On the roof of the catwalk control panel, a single printed sheet.
-The heading reads: "OLAM INDUSTRIAL — NAMEPLATE SUMMARY."
-
-  Mechanical cooling nameplate   : 210 MW
-  IT load nameplate (Phase I)    : 185 MW
-  Diesel generator standby bank  :  72 MW
-  Substation feeder rating       : 230 MW
-  -------------------------------
-  Aggregate connected (Phase I)  : 697 MW
-
-The AUAR narrative box on the next page, redacted for external
-distribution, reads: "project described as light industrial."`);
+  // Reward for making it to the east end of the catwalk: a SPEED CELL
+  // powerup. Matches the "up high → go fast" read, and the catwalk is a
+  // natural long straight run to test it on.
+  addPowerup(48, 3.05, 0, 'speed');
 }
 let _cachedBotTex = null;
 function makeBotChassisTex(){
@@ -6343,9 +6334,155 @@ function addWallWriting(x, y, z, yaw, text, opts={}){
   gs.secretTotal++;
 }
 
-// Hidden evidence fragment — appears visually when beam hits it, can be
-// collected with E. Gives a paragraph of context that extends the main
-// exhibit it's paired with.
+// Powerup pickups — replaced the old hidden "supplemental fragments"
+// (which required the flashlight reveal dance and then dumped a wall
+// of text on pickup). Now the reward for poking into corners is a
+// straightforward gameplay boost: bigger damage, faster feet, or a
+// straight HP heal. Visible at all times, no flashlight ceremony.
+//
+// kinds:
+//   'health' — instant +40 HP on pickup (no duration)
+//   'damage' — outgoing damage +60% for 30 seconds
+//   'speed'  — move speed +50% for 30 seconds
+//   'shield' — incoming damage -50% for 20 seconds
+const POWERUP_META = {
+  health: { color: 0xff6a6a, emissive: 0xaa2828, label: 'MEDKIT',       duration: 0,  amount: 40  },
+  damage: { color: 0xff9030, emissive: 0x9a4a10, label: 'POWER SURGE',  duration: 30, amount: 1.6 },
+  speed:  { color: 0x7be8ff, emissive: 0x2a9abb, label: 'SPEED CELL',   duration: 30, amount: 1.5 },
+  shield: { color: 0xaeb8ff, emissive: 0x3a4a9a, label: 'SHIELD CORE',  duration: 20, amount: 0.5 }
+};
+
+function addPowerup(x, y, z, kind){
+  const meta = POWERUP_META[kind];
+  if(!meta) return;
+  const group = new THREE.Group();
+  group.position.set(x, y, z);
+  // Glowing orb core
+  const coreMat = new THREE.MeshStandardMaterial({
+    color: meta.color, emissive: meta.color, emissiveIntensity: 1.4,
+    metalness: 0.3, roughness: 0.15, transparent: true, opacity: 0.92
+  });
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(0.22, 1), coreMat);
+  core.position.y = 0.2;
+  group.add(core);
+  // Inner bright ball
+  const spark = new THREE.Mesh(
+    new THREE.SphereGeometry(0.09, 12, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  spark.position.y = 0.2;
+  group.add(spark);
+  // Halo ring at base
+  const halo = new THREE.Mesh(
+    new THREE.TorusGeometry(0.32, 0.025, 8, 24),
+    new THREE.MeshBasicMaterial({ color: meta.color, transparent: true, opacity: 0.8 })
+  );
+  halo.rotation.x = Math.PI / 2;
+  halo.position.y = 0.04;
+  group.add(halo);
+  // Rune-style letter stamp above the orb identifies the kind
+  const letter = kind === 'health' ? '+' : kind === 'damage' ? 'X' : kind === 'speed' ? '>' : '#';
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0, 0, 128, 128); g.clearRect(0, 0, 128, 128);
+  g.font = 'bold 96px Consolas, monospace';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillStyle = '#fff';
+  g.fillText(letter, 64, 72);
+  const stampTex = new THREE.CanvasTexture(c);
+  const stamp = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.3, 0.3),
+    new THREE.MeshBasicMaterial({
+      map: stampTex, transparent: true, depthWrite: false,
+      color: meta.color
+    })
+  );
+  stamp.position.set(0, 0.2, 0.24);
+  group.add(stamp);
+  // Soft point light for local glow
+  const pl = new THREE.PointLight(meta.color, 0.8, 4.5);
+  pl.position.y = 0.25;
+  group.add(pl);
+  scene.add(group);
+  // Register as an interactable (reuse the existing interactables array
+  // so collision radius / prompt / onUse flow already handles input).
+  const interact = {
+    kind: 'powerup',
+    pos: new THREE.Vector3(x, y + 0.2, z),
+    radius: 1.4,
+    prompt: 'Collect ' + meta.label,
+    active: true,
+    mesh: group,
+    core, halo, spark,
+    _kind: kind,
+    _meta: meta,
+    onUse: function(){
+      applyPowerup(kind);
+      scene.remove(group);
+      this.active = false;
+      audio.pickup();
+      triggerNetworkCollectPulse();
+    }
+  };
+  gs.interactables.push(interact);
+  gs.powerupPickups = gs.powerupPickups || [];
+  gs.powerupPickups.push(interact);
+}
+
+function applyPowerup(kind){
+  const meta = POWERUP_META[kind];
+  if(!meta) return;
+  const p = gs.player;
+  if(kind === 'health'){
+    p.hp = Math.min(MAX_HP, p.hp + meta.amount);
+    refreshHealthUI();
+  } else {
+    // Stack with remaining time — collecting the same kind again extends
+    // the timer rather than starting over with a shorter duration.
+    p.powerups[kind] = Math.max(p.powerups[kind] || 0, 0) + meta.duration;
+  }
+  flashPowerupBanner(meta.label);
+}
+
+function flashPowerupBanner(label){
+  // Reuse the exhibit banner element for powerup confirmations — short
+  // fade (0.9s on, 0.4s off). Not a blocking modal, just a quick cue.
+  const el = document.getElementById('exhibitBanner');
+  if(!el) return;
+  const stampEl = document.getElementById('exhibitBannerStamp');
+  const msgEl   = document.getElementById('exhibitBannerMsg');
+  if(stampEl) stampEl.textContent = 'POWERUP';
+  if(msgEl)   msgEl.textContent   = label + ' ACTIVE';
+  el.style.opacity = '1';
+  if(gs._exhibitBannerT1) clearTimeout(gs._exhibitBannerT1);
+  if(gs._exhibitBannerT2) clearTimeout(gs._exhibitBannerT2);
+  gs._exhibitBannerT1 = setTimeout(()=>{
+    el.style.opacity = '0';
+  }, 900);
+}
+
+function updatePowerupPickups(dt){
+  if(gs.powerupPickups){
+    for(const p of gs.powerupPickups){
+      if(!p.active) continue;
+      p.core.rotation.y += dt * 1.4;
+      p.core.rotation.x += dt * 0.7;
+      p.halo.rotation.z += dt * 0.9;
+      p.mesh.position.y = p.pos.y - 0.2 + Math.sin(gs.time * 2.1 + p.pos.x) * 0.08;
+    }
+  }
+  // Decrement active buff timers
+  const pu = gs.player && gs.player.powerups;
+  if(pu){
+    pu.damage = Math.max(0, pu.damage - dt);
+    pu.speed  = Math.max(0, pu.speed  - dt);
+    pu.shield = Math.max(0, pu.shield - dt);
+  }
+}
+
+// Hidden evidence fragment — LEGACY, no longer called. Retained only so
+// any stale references still resolve. The pickup flow is now replaced
+// with addPowerup() (fun gameplay boosts) at the same world positions.
 function addHiddenFragment(x, y, z, pairKey, fragTitle, fragBody){
   const group = new THREE.Group();
   group.position.set(x, y, z);
@@ -6914,48 +7051,21 @@ function placeHiddenContent(){
   addWallWriting(-6.9, 2.2, 60, Math.PI/2,
     'file everything.\nthe record is the\nmotion.', {color:'#8ee39c', width:3.0});
 
-  // ---- Hidden evidence fragments (paired with main exhibits) ----
-  // 'grid' exhibit — paired fragment lives on the catwalk itself (added in
-  // decorateServerHall), so there's nothing at floor level in Building A.
-
-  // 'water' — hidden behind a pipe in Cooling Yard
-  addHiddenFragment(-8, 1.3, 44, 'water',
-    'Dakota County — Comment Letter',
-`Dakota County Environmental Resources (written comment, May 2025):
-
-  "The draft AUAR does not address potential impacts on aquifer
-   yield, well interference, or regional groundwater users.
-   Specific analysis is necessary if data center or high-
-   consumption uses are anticipated at this site."
-
-The County is the same entity whose District Court this case sits
-in. Their own professional staff flagged the gap. The Final AUAR
-was adopted anyway.`);
-
-  // 'diesel' — hidden near a transformer base
-  addHiddenFragment(-38, 1.3, -7, 'diesel',
-    'Memphis Comparator — Technical Note',
-`From the MCEA technical file:
-
-  "A comparable hyperscale site in Memphis, Tennessee has been
-   measured emitting more NOx during generator test runs than
-   the adjacent peaker plant and refinery combined."
-
-The AUAR's refusal to specify generator count is not conservative
-design. It is the mechanism by which impact analysis is avoided.`);
-
-  // 'subsidy' — under the office desk
-  addHiddenFragment(1.4, 0.25, -29.3, 'subsidy',
-    'November 21, 2024 — email timestamp',
-`  From: Goodroad, Tina (Community Development Director)
-  To:   [Obsidian Group — redacted]
-  Subj: Re: AUAR
-
-  "That is great news. The AUAR has been kicked off."
-
-Twelve days later the City's public notice went out. The notice
-named "light industrial or office park." The public never saw
-"data center" anywhere on paper.`);
+  // ---- Powerup pickups (replaced the old hidden "supplemental
+  // fragments"). Each sits in a tucked-away corner of the room where
+  // the fragment used to be, so players already exploring those spots
+  // still get rewarded — now with a gameplay boost instead of a wall
+  // of legal text.
+  // Cooling Yard — MEDKIT (the room is long, has multiple bots, and
+  //   usually leaves you a little dinged up).
+  addPowerup(-8, 1.1, 44, 'health');
+  // Substation — POWER SURGE damage boost (thematic: substation = power,
+  //   and the diesel exhibit triggers a multi-enemy trap right there).
+  addPowerup(-38, 1.1, -7, 'damage');
+  // Community Development — SHIELD CORE under the old desk spot. The
+  //   office was cut but the floor is still walkable in some builds;
+  //   harmless no-op if nobody reaches it.
+  addPowerup(1.4, 0.9, -29.3, 'shield');
 }
 
 function placeCorridorLights(){
@@ -7975,6 +8085,12 @@ function createPlayer(){
     footStepTimer: 0,
     sprinting: false,
     flashlight: null,
+    // Powerup timers — seconds of effect remaining. Zero = inactive.
+    // Decremented in updatePlayer, applied at the relevant use sites:
+    //   damage → fireWeapon / releaseChargeShot multiply outgoing dmg
+    //   speed  → updatePlayer scales WALK_SPEED
+    //   shield → damagePlayer scales incoming damage
+    powerups: { damage: 0, speed: 0, shield: 0 },
   };
   gs.player = p;
   // Narrow, intense beam — reads as an actual flashlight, not area lighting.
@@ -8017,7 +8133,8 @@ function updatePlayer(dt){
   const right = input.keys.has('KeyD') ? 1 : 0;
   const sprint = input.keys.has('ShiftLeft') || input.keys.has('ShiftRight');
   p.sprinting = sprint && fwd && p.hp>20;
-  const speed = WALK_SPEED * (p.sprinting ? SPRINT_MULT : 1);
+  const speedPu = (p.powerups && p.powerups.speed > 0) ? POWERUP_META.speed.amount : 1;
+  const speed = WALK_SPEED * (p.sprinting ? SPRINT_MULT : 1) * speedPu;
 
   // Camera forward (ignoring pitch) = (-sin yaw, 0, -cos yaw)
   // Camera right                     = ( cos yaw, 0, -sin yaw)
@@ -8188,7 +8305,10 @@ function fireWeapon(){
   }
   const wallDist = rayHitsWalls(origin, dir, WEAPON_RANGE, gs.walls);
   if(hitEnemy && hitEnemyDist < wallDist){
-    const dmg = headshot ? WEAPON_DAMAGE*2 : WEAPON_DAMAGE;
+    // Outgoing damage scaled by the power-surge buff if active.
+    const pu = gs.player.powerups;
+    const dmgMult = (pu && pu.damage > 0) ? POWERUP_META.damage.amount : 1;
+    const dmg = (headshot ? WEAPON_DAMAGE*2 : WEAPON_DAMAGE) * dmgMult;
     const wasAlive = hitEnemy.alive;
     hitEnemy.takeDamage(dmg);
     const pt = origin.clone().addScaledVector(dir, hitEnemyDist);
@@ -8211,7 +8331,9 @@ function releaseChargeShot(){
   const origin = camera.position.clone();
   const dir = new THREE.Vector3(0,0,-1).applyEuler(camera.rotation).normalize();
   const radius = 4 + lvl*6;
-  const damage = 30 + lvl*70;
+  const pu = gs.player.powerups;
+  const dmgMult = (pu && pu.damage > 0) ? POWERUP_META.damage.amount : 1;
+  const damage = (30 + lvl*70) * dmgMult;
   audio.fire(); audio.noise({dur:0.3, vol:0.3, lp:1600, hp:100});
   // Find burst center: short raycast in front
   const wallDist = rayHitsWalls(origin, dir, 18, gs.walls);
@@ -8400,15 +8522,28 @@ function checkInteract(){
     if(!pu.active) continue;
     const dx=pu.pos.x - p.pos.x, dz=pu.pos.z - p.pos.z;
     const d = Math.hypot(dx,dz);
-    if(d < pu.radius+0.5 && d<bestDist){
+    // Y-gate: require the player's feet to be within 1.8m of the
+    // pickup's base height. Without this check, the catwalk exhibit
+    // (grid, y=3.6) was grabbable from the floor 3.6m below it. Now
+    // you have to actually be on the catwalk (feet y≈3.06) to reach
+    // it; floor pickups (y≈1.3) are still grabbable from ground level.
+    const dy = Math.abs(pu.pos.y - p.pos.y);
+    if(d < pu.radius+0.5 && dy < 1.8 && d<bestDist){
       best = { kind:'pickup', ref:pu, text:'Collect '+gs.evidenceMeta[pu.key].name };
       bestDist = d;
     }
   }
   for(const it of gs.interactables){
     if(it.kind === 'hiddenFragment' && !it.active) continue;  // gated by flashlight
+    if(it.kind === 'powerup' && !it.active) continue;          // already collected
     const dx=it.pos.x - p.pos.x, dz=it.pos.z - p.pos.z;
     const d = Math.hypot(dx,dz);
+    // Powerup pickups should also respect vertical separation — no
+    // grabbing the catwalk speed cell from below.
+    if(it.kind === 'powerup'){
+      const dy = Math.abs(it.pos.y - p.pos.y);
+      if(dy > 1.8) continue;
+    }
     if(d < it.radius && d<bestDist){
       best = { kind:'it', ref:it, text:it.prompt };
       bestDist = d;
@@ -8636,7 +8771,10 @@ function showExhibitBanner(stamp, msg, onDone){
 }
 function damagePlayer(amount){
   const p = gs.player;
-  p.hp = Math.max(0, p.hp - amount);
+  // SHIELD CORE: incoming damage scaled down while active.
+  const shieldMult = (p.powerups && p.powerups.shield > 0)
+    ? POWERUP_META.shield.amount : 1;
+  p.hp = Math.max(0, p.hp - amount * shieldMult);
   p.lastDamageTime = gs.time;
   audio.playerHit();
   flashDamage();
@@ -9873,6 +10011,7 @@ function loop(){
     updateFlickerLights(dt);
     updateLobbyChandelier(dt);
     updateLobbyCircle(dt);
+    updatePowerupPickups(dt);
     updateDualRealitySigns(dt);
     updateHiddenReveals(dt);
     updateCreepChair(dt);
