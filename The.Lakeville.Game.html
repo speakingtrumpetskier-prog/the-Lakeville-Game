@@ -138,6 +138,28 @@
   #toast .t-title { color:var(--mcea-accent); font-weight:bold; margin-bottom:6px; font-size:12px; letter-spacing:3px; }
   #toast .t-body { color:#e8efe9; }
 
+  #exhibitBanner {
+    position:absolute; left:50%; top:22%;
+    transform:translateX(-50%);
+    background:rgba(8,20,14,0.92);
+    border:1px solid var(--mcea-green);
+    padding:18px 30px;
+    font-size:16px; letter-spacing:1px;
+    border-radius:2px;
+    opacity:0;
+    max-width:640px; text-align:center;
+    box-shadow:0 0 26px rgba(63,178,104,0.5);
+    transition:opacity 0.35s ease;
+    pointer-events:none;
+  }
+  #exhibitBanner .stamp {
+    color:var(--mcea-accent); font-weight:bold; margin-bottom:10px;
+    font-size:11px; letter-spacing:4px;
+  }
+  #exhibitBanner .msg {
+    color:#e8efe9; line-height:1.45; font-weight:400;
+  }
+
   #damageFlash {
     position:absolute; inset:0;
     background:radial-gradient(ellipse at center, transparent 40%, rgba(255,50,70,0.5) 100%);
@@ -393,6 +415,7 @@
   </div>
   <div id="interactPrompt"><kbd>E</kbd><span id="interactText">Interact</span></div>
   <div id="toast"><div class="t-title" id="toastTitle"></div><div class="t-body" id="toastBody"></div></div>
+  <div id="exhibitBanner"><div class="stamp" id="exhibitBannerStamp">EXHIBIT</div><div class="msg" id="exhibitBannerMsg"></div></div>
   <div id="damageFlash"></div>
 </div>
 
@@ -3044,7 +3067,7 @@ function decorateLobbyCenterpiece(){
   // activation source for the green pattern radiating out from it.
   const rimMat = new THREE.MeshStandardMaterial({
     color:0xc9a548, metalness:0.95, roughness:0.18,
-    emissive:0x1faa3c, emissiveIntensity:0.9
+    emissive:0x3a2a0a, emissiveIntensity:0.3
   });
   const rim = new THREE.Mesh(new THREE.TorusGeometry(3.6, 0.04, 8, 64), rimMat);
   rim.rotation.x = Math.PI/2;
@@ -3054,7 +3077,9 @@ function decorateLobbyCenterpiece(){
     rimMat,
     cx, cz,
     radius: 3.6,
-    activation: 0,     // 0 = off-disc (steady green pulse); 1 = on-disc (brighter, faster pulse)
+    activation: 0,     // 0 = off-disc; 1 = on-disc (brighter pulse)
+    litEase: 0,        // eases 0→1 when the lobby network first lights up
+    bronzeEmissive: new THREE.Color(0x3a2a0a),
     greenEmissive:  new THREE.Color(0x1faa3c)   // matches lobby network hex 0x00ff44 toned for emissive
   };
 
@@ -3420,35 +3445,43 @@ function updateLobbyChandelier(dt){
   }
 }
 
-// Brass rim under the chandelier. Always glows bright green so it
-// reads as the clear source of the green floor lines radiating out
-// from it — from any angle, outside or inside the disc, the rim is
-// visibly the origin of the pattern. Standing on the disc intensifies
-// the pulse (brighter, quicker) so the rim still gives feedback on
-// foot-presence, but there's no dormant bronze state.
+// Brass rim under the chandelier. Tied to the lobby network's own
+// activation: stays bronze-dormant until gs.network.litRooms['Lobby']
+// fires (the player walks north past the reception desk, which is the
+// same moment the green floor lines emanate out from the rim). Once
+// lit, the rim glows green in sync with the floor pattern. Standing
+// on the disc then intensifies the pulse on top of the green baseline.
 function updateLobbyCircle(dt){
   const lc = gs.lobbyCircle;
   if(!lc || !lc.rimMat) return;
+  // Ease lit-state toward the lobby's current activation flag. The
+  // floor network fades its lines in over ~0.5s on activation, and
+  // the rim matches that pace so they light up together visually.
+  const lobbyLit = !!(gs.network && gs.network.litRooms && gs.network.litRooms['Lobby']);
+  lc.litEase += ((lobbyLit ? 1 : 0) - lc.litEase) * Math.min(1, dt * 2.0);
+  const lit = lc.litEase;
+  // On-disc activation (adds a stronger pulse on top of the green
+  // baseline). Only meaningful once the rim is already lit.
   const dx = gs.player.pos.x - lc.cx;
   const dz = gs.player.pos.z - lc.cz;
   const dist = Math.hypot(dx, dz);
   const inside = dist < lc.radius;
-  // Ease activation toward target. Entering feels responsive
-  // (~0.35s to full on); leaving decays slower (~0.9s) so the rim
-  // doesn't snap off the moment the player steps over the edge.
   const target = inside ? 1 : 0;
   const k = inside ? Math.min(1, dt * 2.8) : Math.min(1, dt * 1.1);
   lc.activation += (target - lc.activation) * k;
   const a = lc.activation;
-  // Emissive is always green — the rim matches the floor lines so the
-  // lines visibly emanate from it. Only the intensity responds to the
-  // player stepping onto the disc.
-  lc.rimMat.emissive.copy(lc.greenEmissive);
-  // Baseline: slow pulse ~0.7–1.0 (reads as actively lit from any
-  // angle). Active addition: faster, stronger pulse on top.
-  const baseline = 0.85 + Math.sin(gs.time * 1.7) * 0.15;
-  const activePeak = 1.7 + Math.sin(gs.time * 2.6) * 0.4;
-  lc.rimMat.emissiveIntensity = baseline + a * (activePeak - baseline);
+  // Color: bronze → green as the lobby lights up.
+  lc.rimMat.emissive.copy(lc.bronzeEmissive).lerp(lc.greenEmissive, lit);
+  // Intensity: dormant bronze sits at a steady dim 0.3. Lit green
+  // baseline pulses ~0.85; the on-disc activation lifts it toward
+  // a brighter ~1.7 peak pulse. Everything is proportional to `lit`
+  // so the rim never gets a premature green glow before the lines do.
+  const bronzeIntensity = 0.3;
+  const greenBaseline  = 0.85 + Math.sin(gs.time * 1.7) * 0.15;
+  const greenActive    = 1.7  + Math.sin(gs.time * 2.6) * 0.4;
+  const base  = bronzeIntensity * (1 - lit) + greenBaseline * lit;
+  const peak  = bronzeIntensity * (1 - lit) + greenActive  * lit;
+  lc.rimMat.emissiveIntensity = base + a * (peak - base);
 }
 
 function decorateServerHall(){
@@ -5966,23 +5999,35 @@ function decorateFilingRoom(){
   scene.add(halo);
 
   // ---- GALLERY PEWS (south) ----
+  // Each row is split into LEFT and RIGHT pews with a 2m central
+  // aisle so the player can walk straight from the south door to the
+  // deposit podium without climbing over a bench. Reads as a proper
+  // ceremonial aisle rather than the previous continuous barricade.
   for(const pz of [58.0, 55.5]){
-    // Seat slab
-    const seat = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.12, 0.55), pewMat);
-    seat.position.set(0, 0.78, pz); scene.add(seat);
-    // Backrest
-    const back = new THREE.Mesh(new THREE.BoxGeometry(5.2, 1.0, 0.1), pewMat);
-    back.position.set(0, 1.3, pz + 0.3); scene.add(back);
-    // Backrest top cap
-    const bCap = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.08, 0.15), medWoodMat);
-    bCap.position.set(0, 1.82, pz + 0.3); scene.add(bCap);
-    // End pieces
-    for(const sx of [-2.55, 2.55]){
-      const endcap = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.5, 0.7), pewMat);
-      endcap.position.set(sx, 1.1, pz + 0.1); scene.add(endcap);
+    for(const half of [
+      { cx: -2.4, outer: -3.8, inner: -1.0 },
+      { cx:  2.4, outer:  3.8, inner:  1.0 }
+    ]){
+      const halfW = Math.abs(half.outer - half.inner);
+      // Seat slab
+      const seat = new THREE.Mesh(new THREE.BoxGeometry(halfW, 0.12, 0.55), pewMat);
+      seat.position.set(half.cx, 0.78, pz); scene.add(seat);
+      // Backrest
+      const back = new THREE.Mesh(new THREE.BoxGeometry(halfW, 1.0, 0.1), pewMat);
+      back.position.set(half.cx, 1.3, pz + 0.3); scene.add(back);
+      // Backrest top cap
+      const bCap = new THREE.Mesh(new THREE.BoxGeometry(halfW, 0.08, 0.15), medWoodMat);
+      bCap.position.set(half.cx, 1.82, pz + 0.3); scene.add(bCap);
+      // End pieces — both ends of this half (outer + aisle-facing)
+      for(const sx of [half.outer, half.inner]){
+        const endcap = new THREE.Mesh(new THREE.BoxGeometry(0.12, 1.5, 0.7), pewMat);
+        endcap.position.set(sx, 1.1, pz + 0.1); scene.add(endcap);
+      }
+      const minX = Math.min(half.outer, half.inner);
+      const maxX = Math.max(half.outer, half.inner);
+      gs.walls.push({ minX: minX - 0.1, maxX: maxX + 0.1,
+                      minZ: pz - 0.3,    maxZ: pz + 0.5 });
     }
-    // Collision box covering seat + backrest
-    gs.walls.push({minX:-2.7, maxX:2.7, minZ: pz - 0.3, maxZ: pz + 0.5});
   }
 
   // ---- MARBLE COLUMNS (four corners) ----
@@ -8278,41 +8323,46 @@ function collectPickup(pu){
   audio.pickup();
   triggerNetworkCollectPulse();
   const meta = gs.evidenceMeta[pu.key];
-  openDocModal({
-    stamp:'EXHIBIT '+({grid:'A', water:'B', diesel:'C', subsidy:'D'}[pu.key]||'A'),
-    type: meta.docType,
-    date: meta.docDate,
-    title: meta.docTitle,
-    body: meta.docBody,
-    sig: meta.sig,
-    note:false,
-    onClose: ()=>{
-      gs.evidence[pu.key] = true;
-      refreshEvidenceUI();
-      showToast('EVIDENCE SECURED', meta.name);
-      // Mark the room "cleared" for lobby-spine dim logic.
-      const roomOf = {
-        'grid':    'Building A — Light Industrial',
-        'water':   'Cooling Yard',
-        'diesel':  'Substation',
-        'subsidy': 'Community Development'
-      };
-      const r = roomOf[pu.key];
-      if(r){
-        gs.clearedRooms = gs.clearedRooms || {};
-        gs.clearedRooms[r] = true;
-      }
-      // Substation ambush on the diesel exhibit.
-      if(pu.key === 'diesel' && gs.substationTrap && gs.substationTrap.state === 'inactive'){
-        triggerSubstationTrap();
-      }
-      if(pu.key === 'grid') triggerCatwalkPowerDown();
-      if(pu.key === 'water') triggerCoolingWindDown();
-      if(allEvidence() && !gs.bossSpawned){
-        spawnBoss();
-      } else if(!allEvidence()){
-        updateObjectiveFromEvidence();
-      }
+  const stampLetter = {grid:'A', water:'B', diesel:'C', subsidy:'D'}[pu.key] || 'A';
+  const stamp = 'EXHIBIT ' + stampLetter;
+  // Per-exhibit one-line findings. Each names a specific gap in the
+  // AUAR and is the entirety of what the player reads — no full-screen
+  // modal, no extra prose. Drafted to stand alone so the banner can
+  // stay brief.
+  const bannerMsg = ({
+    grid:   'AUAR pretends a data center would use the same amount of electricity as a Walmart.',
+    water:  'AUAR has no facts on environmental impacts of 2,500,000 gallons per day water usage.',
+    diesel: 'AUAR admits generators exist but doesn\u2019t disclose air quality impact.'
+  })[pu.key] || meta.docTitle;
+
+  // Mark the exhibit secured NOW so the UI reflects the pickup
+  // immediately even while the banner is on-screen. The consequence
+  // (trap / power-down / wind-down) fires only after the banner fades.
+  gs.evidence[pu.key] = true;
+  refreshEvidenceUI();
+  const roomOf = {
+    'grid':    'Building A — Light Industrial',
+    'water':   'Cooling Yard',
+    'diesel':  'Substation',
+    'subsidy': 'Community Development'
+  };
+  const r = roomOf[pu.key];
+  if(r){
+    gs.clearedRooms = gs.clearedRooms || {};
+    gs.clearedRooms[r] = true;
+  }
+
+  showExhibitBanner(stamp, bannerMsg, () => {
+    // Substation ambush on the diesel exhibit.
+    if(pu.key === 'diesel' && gs.substationTrap && gs.substationTrap.state === 'inactive'){
+      triggerSubstationTrap();
+    }
+    if(pu.key === 'grid')  triggerCatwalkPowerDown();
+    if(pu.key === 'water') triggerCoolingWindDown();
+    if(allEvidence() && !gs.bossSpawned){
+      spawnBoss();
+    } else if(!allEvidence()){
+      updateObjectiveFromEvidence();
     }
   });
 }
@@ -8433,6 +8483,30 @@ function updateToast(dt){
   // caller doesn't need to be touched.
   const el = $('toast');
   if(el && el.style.display !== 'none') el.style.display = 'none';
+}
+
+// Non-interrupting exhibit banner. Fades in, holds ~2s, fades out,
+// then runs onDone. Replaces the full-screen document modal for the
+// main-exhibit pickups so gameplay keeps moving — the player reads a
+// single finding, the banner clears, and the room's consequence (trap,
+// catwalk power-down, cooling wind-down) then fires.
+function showExhibitBanner(stamp, msg, onDone){
+  const el = $('exhibitBanner');
+  if(!el){ if(onDone) onDone(); return; }
+  $('exhibitBannerStamp').textContent = stamp || 'EXHIBIT';
+  $('exhibitBannerMsg').textContent   = msg || '';
+  el.style.opacity = '1';
+  if(gs._exhibitBannerT1) clearTimeout(gs._exhibitBannerT1);
+  if(gs._exhibitBannerT2) clearTimeout(gs._exhibitBannerT2);
+  // Hold for ~2s of full visibility, then start the 0.35s fade-out.
+  // onDone fires once the fade completes so the room consequence
+  // lands after the text has left the screen.
+  gs._exhibitBannerT1 = setTimeout(()=>{
+    el.style.opacity = '0';
+    gs._exhibitBannerT2 = setTimeout(()=>{
+      if(onDone) onDone();
+    }, 400);
+  }, 2000);
 }
 function damagePlayer(amount){
   const p = gs.player;
@@ -9235,7 +9309,11 @@ function init(){
   renderer.setSize(innerWidth, innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  // Global brightness +40% pass: exposure lifted 1.1 → 1.55 and the
+  // two fill lights (ambient + hemi) each lifted 40% so interiors
+  // that used to read as "too dark" now have enough fill for the
+  // environment to parse without losing the dim ambient mood.
+  renderer.toneMappingExposure = 1.55;
   renderer.shadowMap.enabled = false;
   document.body.appendChild(renderer.domElement);
 
@@ -9243,9 +9321,9 @@ function init(){
   gs._perfSamples = [];
   gs._perfRatio = renderer.getPixelRatio();
 
-  const amb = new THREE.AmbientLight(0x304438, 0.25);
+  const amb = new THREE.AmbientLight(0x304438, 0.35);
   scene.add(amb);
-  const hemi = new THREE.HemisphereLight(0x7ae0a3, 0x0a0f0c, 0.18);
+  const hemi = new THREE.HemisphereLight(0x7ae0a3, 0x0a0f0c, 0.25);
   scene.add(hemi);
 
   buildLevel();
@@ -9405,13 +9483,14 @@ function animateMenuCanvas(){
       hall,
       t: phase,              // position along the roof, 0..1
       dir: Math.random() < 0.5 ? 1 : -1,
-      // ~0.0013 per frame at 60fps → crosses the hall in ~12s. Was 1000x
-      // too fast, which ping-ponged the clamp every frame and flickered.
-      speed: 0.0011 + Math.random()*0.0006,
+      // Walkers now move at 30% of their previous pace — reads as a
+      // slower, more deliberate patrol. speed + gait both scaled so
+      // the step cadence stays proportional to the forward motion.
+      speed: (0.0011 + Math.random()*0.0006) * 0.3,
       height: 0.030 + Math.random()*0.006,
       width: 0.006 + Math.random()*0.002,
       phase: Math.random()*Math.PI*2,
-      gait: 0.10 + Math.random()*0.03,
+      gait: (0.10 + Math.random()*0.03) * 0.3,
       stutter: 0,
       pauseChance: 0.0008
     });
