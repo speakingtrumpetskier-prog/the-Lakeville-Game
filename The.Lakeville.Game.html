@@ -441,9 +441,6 @@
 <div id="victory" class="screen hud-hide">
   <h1>MOTION GRANTED</h1>
   <h2>DAKOTA COUNTY DISTRICT COURT &middot; FIRST JUDICIAL DISTRICT</h2>
-  <p>The court found the AUAR failed Minn. R. 4410.3610 subp. 5a(B). Adequacy
-  determination reversed; remanded with instructions to prepare an AUAR describing
-  a specific project, evaluating its impacts, and imposing enforceable mitigation.</p>
   <div class="end-stats" id="victoryStats"></div>
   <button class="btn" id="nextBtn">RETURN TO MENU</button>
 </div>
@@ -9954,12 +9951,10 @@ function winGame(){
     : (surveys > 0
       ? '<div>RECEPTOR SURVEY: '+surveys+' / 3 (optional)</div>'
       : '');
-  $('victoryStats').innerHTML =
-    '<div>TIME ELAPSED: '+elapsed+'s</div>'+
-    '<div>EXHIBITS FILED: 4 / 4</div>'+
-    '<div>COUNTS REMANDED: PROJECT DESCRIPTION / WATER / POWER / GENERATORS</div>'+
-    '<div>RELIEF: AUAR VACATED; REMAND UNDER MINN. R. 4410.3610 SUBP. 5a</div>'+
-    costsLine;
+  // Stat block cut to just the (optional) receptor-survey line. The
+  // TIME / EXHIBITS / COUNTS / RELIEF lines were removed per design
+  // pass — the headline + RETURN button carries the victory.
+  $('victoryStats').innerHTML = costsLine;
   victory.classList.remove('hud-hide');
 }
 
