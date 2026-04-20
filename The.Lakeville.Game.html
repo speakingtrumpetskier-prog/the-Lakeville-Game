@@ -1640,7 +1640,9 @@ function buildLevel(){
     scene.remove(lobbyRoom.ceil);
     const lobbyCeilMat = new THREE.MeshBasicMaterial({
       map: makeLobbyCeilTex(),
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      fog: false,       // fog at distant corners was dimming the ceiling
+      toneMapped: false // and ACES tone mapping was also eating brightness
     });
     const newCeil = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.2, 23.8), lobbyCeilMat);
     newCeil.position.set(0, 7.5, 0);
@@ -2931,149 +2933,93 @@ function makeLobbyCeilTex(){
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(1, 1);
   tex.anisotropy = 8;
+  // Canvas values are painted as sRGB (perceptual) — explicitly tagging
+  // the texture as SRGBColorSpace prevents the renderer from treating
+  // them as linear, which was turning bright pixel values dim on output.
+  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
-// Obelisk-style pylon shaft texture. Circuit traces + panel seams +
-// rivet columns on a deep blue-gray base. One canvas tiles down each
-// 0.85m × 4.8m shaft face; the brass + cyan nodes are self-emissive
-// (via the material's emissiveMap) so the pylons glow without an
-// extra light rig.
+// Chic-industrial pylon shaft texture. Same vocabulary as
+// makePanelWallTex (brushed panels, corner rivets, seam lines, grime
+// streaks) so the pylons read as made of the same metal as the walls —
+// just darker/tighter grain and with narrow brass accent strips so
+// they're distinct at a glance.
 function makePylonTex(){
   const c = document.createElement('canvas');
-  c.width = 256; c.height = 1024;   // tall/narrow aspect for the shaft
+  c.width = 256; c.height = 640;   // tall aspect for the shaft
   const g = c.getContext('2d');
-  // Deep steel-blue base — not black, so it reads distinctly from the
-  // room backdrop.
-  g.fillStyle = '#2a3a54';
-  g.fillRect(0, 0, 256, 1024);
-  // Vertical fluting — six wide channels of lighter gradient.
-  for(let i = 0; i < 6; i++){
-    const fx = 16 + i * 42;
-    const grad = g.createLinearGradient(fx - 14, 0, fx + 14, 0);
-    grad.addColorStop(0, 'rgba(90,114,150,0)');
-    grad.addColorStop(0.5, 'rgba(110,138,180,0.55)');
-    grad.addColorStop(1, 'rgba(90,114,150,0)');
-    g.fillStyle = grad;
-    g.fillRect(fx - 14, 0, 28, 1024);
-  }
-  // Stacked horizontal panel seams every 128px.
-  g.strokeStyle = 'rgba(160,180,210,0.45)';
-  g.lineWidth = 1;
-  for(let y = 128; y < 1024; y += 128){
-    g.beginPath(); g.moveTo(0, y); g.lineTo(256, y); g.stroke();
-    // Shadow line immediately below for depth.
-    g.strokeStyle = 'rgba(0,0,0,0.45)';
-    g.beginPath(); g.moveTo(0, y+1); g.lineTo(256, y+1); g.stroke();
-    g.strokeStyle = 'rgba(160,180,210,0.45)';
-  }
-  // Circuit traces — zigzag cyan lines with hex nodes at each break.
-  g.strokeStyle = '#7ae0ff';
-  g.lineWidth = 2;
-  for(let row = 0; row < 8; row++){
-    const y = 64 + row * 128;
-    const flip = row % 2 === 0 ? 1 : -1;
-    g.beginPath();
-    g.moveTo(20, y);
-    g.lineTo(70, y);
-    g.lineTo(90, y + 14 * flip);
-    g.lineTo(130, y + 14 * flip);
-    g.stroke();
-    // Hex node
-    const nx = 140, ny = y + 14 * flip;
-    g.fillStyle = '#b8f0ff';
-    g.beginPath();
-    for(let a = 0; a < 6; a++){
-      const ang = a * Math.PI / 3;
-      const px = nx + Math.cos(ang) * 7;
-      const py = ny + Math.sin(ang) * 7;
-      if(a === 0) g.moveTo(px, py); else g.lineTo(px, py);
+  // Slightly darker base than the wall, with a cool grey-blue cast.
+  g.fillStyle = '#141c1f';
+  g.fillRect(0, 0, 256, 640);
+  // 1x5 stacked panels.
+  const panels = 5;
+  const pw = 256, ph = 640 / panels;
+  for(let pi = 0; pi < panels; pi++){
+    const v = 34 + Math.random()*16;
+    g.fillStyle = `rgb(${v},${v+5},${v+2})`;
+    g.fillRect(6, pi*ph + 6, pw - 12, ph - 12);
+    // Brushed-metal streaks
+    for(let s = 0; s < 180; s++){
+      g.fillStyle = `rgba(210,222,220,${Math.random()*0.05})`;
+      g.fillRect(8 + Math.random()*(pw-16),
+                 pi*ph + 8 + Math.random()*(ph-16),
+                 3, 1);
     }
-    g.closePath();
-    g.fill();
-    // Continue trace right with a little glow stub.
-    g.beginPath();
-    g.moveTo(148, ny);
-    g.lineTo(190, ny);
-    g.lineTo(210, y);
-    g.lineTo(236, y);
-    g.stroke();
-    // Small circle end-dot
-    g.fillStyle = '#e4fbff';
-    g.beginPath();
-    g.arc(236, y, 3, 0, Math.PI*2); g.fill();
+    // Corner rivets
+    const rivets = [
+      [14, pi*ph + 14], [pw-18, pi*ph + 14],
+      [14, (pi+1)*ph - 14], [pw-18, (pi+1)*ph - 14]
+    ];
+    for(const [rx, ry] of rivets){
+      const rad = g.createRadialGradient(rx-1, ry-1, 0, rx, ry, 4);
+      rad.addColorStop(0, '#c0d0c8');
+      rad.addColorStop(0.55, '#3a4845');
+      rad.addColorStop(1, '#14201c');
+      g.fillStyle = rad;
+      g.beginPath(); g.arc(rx, ry, 4, 0, Math.PI*2); g.fill();
+    }
+    // Occasional grime streak
+    if(Math.random() < 0.4){
+      g.strokeStyle = 'rgba(0,0,0,0.4)';
+      g.lineWidth = 1.5;
+      g.beginPath();
+      const sx = 30 + Math.random()*(pw-60);
+      g.moveTo(sx, pi*ph + ph*0.22);
+      g.lineTo(sx + (Math.random()-0.5)*10, pi*ph + ph*0.85);
+      g.stroke();
+    }
   }
-  // Rivet columns along both edges.
-  g.fillStyle = '#1a2842';
-  for(let y = 24; y < 1024; y += 48){
-    g.beginPath(); g.arc(10, y, 3, 0, Math.PI*2); g.fill();
-    g.beginPath(); g.arc(246, y, 3, 0, Math.PI*2); g.fill();
-    // Rivet highlight
-    g.fillStyle = 'rgba(180,200,230,0.5)';
-    g.beginPath(); g.arc(10, y-1, 1.2, 0, Math.PI*2); g.fill();
-    g.beginPath(); g.arc(246, y-1, 1.2, 0, Math.PI*2); g.fill();
-    g.fillStyle = '#1a2842';
+  // Horizontal seam lines between panels (dark).
+  g.fillStyle = '#0a120e';
+  for(let pi = 0; pi <= panels; pi++){
+    g.fillRect(0, pi*ph - 2, 256, 4);
   }
-  // Brass band stripes at the 1/4 and 3/4 marks — hints of ornament.
-  for(const yb of [256, 768]){
-    g.fillStyle = '#c9a548';
-    g.fillRect(0, yb-3, 256, 6);
-    g.fillStyle = 'rgba(255,230,140,0.8)';
-    g.fillRect(0, yb-1, 256, 2);
-  }
+  // Vertical seam lines on both sides (suggests corner edges).
+  g.fillRect(0, 0, 4, 640);
+  g.fillRect(252, 0, 4, 640);
+  // Two thin brass accent strips running down the inner face to
+  // mark the pylon as decorative / distinct from a plain wall.
+  g.fillStyle = '#8a6820';
+  g.fillRect(110, 0, 3, 640);
+  g.fillRect(143, 0, 3, 640);
+  g.fillStyle = '#c9a548';
+  g.fillRect(111, 0, 1, 640);
+  g.fillRect(144, 0, 1, 640);
+  // Tiny stenciled warning/ID mark on one panel.
+  g.save();
+  g.translate(pw/2, ph*2.5);
+  g.fillStyle = 'rgba(210,200,120,0.55)';
+  g.font = 'bold 22px Consolas, monospace';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('OLAM', 0, -12);
+  g.fillText('L-1', 0, 14);
+  g.restore();
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.anisotropy = 4;
-  return tex;
-}
-
-// Emissive map companion for makePylonTex — only the glowing bits
-// (cyan traces, brass bands, hex nodes) are non-black, so emissive
-// lights those pixels from within.
-function makePylonEmissiveTex(){
-  const c = document.createElement('canvas');
-  c.width = 256; c.height = 1024;
-  const g = c.getContext('2d');
-  // Fill with black so non-glow pixels don't self-emit.
-  g.fillStyle = '#000';
-  g.fillRect(0, 0, 256, 1024);
-  // Re-draw only the cyan traces + hex nodes + end-dots + brass bands.
-  g.strokeStyle = '#7ae0ff';
-  g.lineWidth = 2;
-  for(let row = 0; row < 8; row++){
-    const y = 64 + row * 128;
-    const flip = row % 2 === 0 ? 1 : -1;
-    g.beginPath();
-    g.moveTo(20, y); g.lineTo(70, y); g.lineTo(90, y + 14*flip);
-    g.lineTo(130, y + 14*flip);
-    g.stroke();
-    const nx = 140, ny = y + 14*flip;
-    g.fillStyle = '#b8f0ff';
-    g.beginPath();
-    for(let a = 0; a < 6; a++){
-      const ang = a * Math.PI / 3;
-      const px = nx + Math.cos(ang)*7, py = ny + Math.sin(ang)*7;
-      if(a === 0) g.moveTo(px, py); else g.lineTo(px, py);
-    }
-    g.closePath(); g.fill();
-    g.strokeStyle = '#7ae0ff';
-    g.beginPath();
-    g.moveTo(148, ny); g.lineTo(190, ny); g.lineTo(210, y); g.lineTo(236, y);
-    g.stroke();
-    g.fillStyle = '#e4fbff';
-    g.beginPath(); g.arc(236, y, 3, 0, Math.PI*2); g.fill();
-  }
-  // Brass bands
-  for(const yb of [256, 768]){
-    g.fillStyle = '#c9a548';
-    g.fillRect(0, yb-3, 256, 6);
-    g.fillStyle = '#ffe68c';
-    g.fillRect(0, yb-1, 256, 2);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
@@ -3375,118 +3321,72 @@ function decorateLobbyCenterpiece(){
   };
 
   // ---- FLANKING PYLONS ----
-  // Two tech-obelisks framing the path from the chandelier toward the
-  // Corr N doorway. Rebuilt: textured shafts with glowing circuit
-  // traces + hex nodes, brass bands at quarter marks, cornice with
-  // brass trim, crystal crown, and a floating ring of 6 small orbs
-  // above each pylon.
+  // Two chic-industrial pillars framing the path toward the Corr N
+  // doorway. Same panel/rivet vocabulary as the walls (see
+  // makePylonTex) so they read as part of the building, not as
+  // foreign "techno obelisks." Simple plinth + shaft + capital +
+  // brass-and-stone crown. No spinning crystals, no orbit rings.
   const pylonCz = cz + 3;
-  const pylonTex = makePylonTex();
-  const pylonEmis = makePylonEmissiveTex();
   const pylonShaftMat = new THREE.MeshStandardMaterial({
-    map: pylonTex,
-    emissiveMap: pylonEmis,
-    emissive: 0xffffff,              // emissiveMap tint; white = pass through
-    emissiveIntensity: 1.2,
-    metalness: 0.45, roughness: 0.35
+    map: makePylonTex(),
+    metalness: 0.55, roughness: 0.45
   });
   const pylonFrameMat = new THREE.MeshStandardMaterial({
-    color: 0x3a4a66, metalness: 0.75, roughness: 0.35,
-    emissive: 0x1a2336, emissiveIntensity: 0.5
+    color: 0x1e2a28, metalness: 0.55, roughness: 0.5
   });
   const brassMat = new THREE.MeshStandardMaterial({
-    color: 0xc9a548, metalness: 0.95, roughness: 0.22,
-    emissive: 0x8a6820, emissiveIntensity: 0.8
+    color: 0xb89040, metalness: 0.9, roughness: 0.3,
+    emissive: 0x6a4e18, emissiveIntensity: 0.5
   });
-  const crystalMat = new THREE.MeshStandardMaterial({
-    color: 0xa0e8ff, transparent: true, opacity: 0.78,
-    emissive: 0x4ab0cc, emissiveIntensity: 1.6,
-    roughness: 0.1, metalness: 0.1
+  const topLightMat = new THREE.MeshBasicMaterial({
+    color: 0xd8f3dc, transparent: true, opacity: 0.85
   });
-  const orbitMat = new THREE.MeshBasicMaterial({ color: 0x9be8f0 });
 
   const pylonH   = 4.8;
   const plinthH  = 0.32;
-  const capitalH = 0.35;
   const shaftCy  = plinthH + pylonH/2;
 
-  gs.pylonCrystals = gs.pylonCrystals || [];
-  gs.pylonOrbits   = gs.pylonOrbits   || [];
-
   for(const px of [-5.2, 5.2]){
-    // Two-tier plinth — wider base + bevel.
+    // Two-tier plinth.
     const plinthBase = new THREE.Mesh(
       new THREE.BoxGeometry(1.35, 0.18, 1.35), pylonFrameMat);
     plinthBase.position.set(px, 0.09, pylonCz); scene.add(plinthBase);
     const plinthTop = new THREE.Mesh(
       new THREE.BoxGeometry(1.15, 0.14, 1.15), pylonFrameMat);
     plinthTop.position.set(px, 0.25, pylonCz); scene.add(plinthTop);
-    // Brass base ring
+    // Brass base band.
     const baseBand = new THREE.Mesh(
-      new THREE.BoxGeometry(1.2, 0.04, 1.2), brassMat);
+      new THREE.BoxGeometry(1.18, 0.04, 1.18), brassMat);
     baseBand.position.set(px, 0.34, pylonCz); scene.add(baseBand);
 
-    // Main shaft (textured) — slightly narrower than plinth top.
+    // Paneled shaft — the main face. Walls have the same style.
     const shaft = new THREE.Mesh(
-      new THREE.BoxGeometry(0.92, pylonH, 0.92), pylonShaftMat);
+      new THREE.BoxGeometry(0.95, pylonH, 0.95), pylonShaftMat);
     shaft.position.set(px, shaftCy, pylonCz); scene.add(shaft);
-    // Beveled outer shell — a slightly larger frame of the dark metal
-    // material visible only at corners where the shaft doesn't cover.
-    // This reads as recessed paneling.
-    const shaftShell = new THREE.Mesh(
-      new THREE.BoxGeometry(0.98, pylonH + 0.02, 0.98), pylonFrameMat);
-    shaftShell.position.set(px, shaftCy, pylonCz);
-    // Render behind the main shaft so its faces peek at corners via
-    // render order. (Same position, so z-test will normally draw the
-    // nearer face — that's the shaft. Fine.)
-    scene.add(shaftShell);
 
-    // Mid brass cinches — three thin bands at 25/50/75% height.
-    for(const f of [0.25, 0.5, 0.75]){
-      const by = plinthH + pylonH * f;
-      const cinch = new THREE.Mesh(
-        new THREE.BoxGeometry(1.02, 0.06, 1.02), brassMat);
-      cinch.position.set(px, by, pylonCz); scene.add(cinch);
-    }
-
-    // Capital — tiered cornice.
+    // Capital — tiered cornice with a brass stripe.
     const capBot = new THREE.Mesh(
       new THREE.BoxGeometry(1.15, 0.10, 1.15), pylonFrameMat);
     capBot.position.set(px, plinthH + pylonH + 0.05, pylonCz); scene.add(capBot);
-    const capMid = new THREE.Mesh(
-      new THREE.BoxGeometry(1.3, 0.12, 1.3), brassMat);
-    capMid.position.set(px, plinthH + pylonH + 0.16, pylonCz); scene.add(capMid);
+    const capBrass = new THREE.Mesh(
+      new THREE.BoxGeometry(1.22, 0.06, 1.22), brassMat);
+    capBrass.position.set(px, plinthH + pylonH + 0.13, pylonCz); scene.add(capBrass);
     const capTop = new THREE.Mesh(
       new THREE.BoxGeometry(1.05, 0.08, 1.05), pylonFrameMat);
-    capTop.position.set(px, plinthH + pylonH + 0.26, pylonCz); scene.add(capTop);
+    capTop.position.set(px, plinthH + pylonH + 0.20, pylonCz); scene.add(capTop);
 
-    // Crystal crown — octahedron, spins in update loop.
-    const crystal = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.24, 0), crystalMat);
-    crystal.position.set(px, plinthH + pylonH + 0.58, pylonCz);
-    scene.add(crystal);
-    gs.pylonCrystals.push(crystal);
-    const crystalCore = new THREE.Mesh(
-      new THREE.SphereGeometry(0.08, 10, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    crystalCore.position.copy(crystal.position);
-    scene.add(crystalCore);
-    const crystalLight = new THREE.PointLight(0x7ae0ff, 1.2, 6);
-    crystalLight.position.copy(crystal.position);
-    scene.add(crystalLight);
+    // Small recessed dome lamp on top — warm glow, matches the
+    // lobby's ambient palette. No animation.
+    const lamp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.18, 16, 10, 0, Math.PI*2, 0, Math.PI/2),
+      topLightMat);
+    lamp.position.set(px, plinthH + pylonH + 0.26, pylonCz);
+    scene.add(lamp);
+    const lampPt = new THREE.PointLight(0xd8f3dc, 0.55, 4.5);
+    lampPt.position.set(px, plinthH + pylonH + 0.32, pylonCz);
+    scene.add(lampPt);
 
-    // Ring of six small orbs orbiting the crystal (slow sweep).
-    const orbit = { cx: px, cy: plinthH + pylonH + 0.58, cz: pylonCz, orbs: [] };
-    for(let i = 0; i < 6; i++){
-      const orb = new THREE.Mesh(
-        new THREE.SphereGeometry(0.05, 10, 8), orbitMat);
-      scene.add(orb);
-      orbit.orbs.push(orb);
-    }
-    gs.pylonOrbits.push(orbit);
-
-    // Collision
+    // Collision.
     gs.walls.push({
       minX: px - 0.6, maxX: px + 0.6,
       minZ: pylonCz - 0.6, maxZ: pylonCz + 0.6
@@ -3804,30 +3704,6 @@ function updateLobbyChandelier(dt){
     for(let i=0;i<c.pointLights.length;i++) c.pointLights[i].intensity *= 0.15;
     c.toothLight.intensity *= 0.25;
     c.nextTwitch = 6 + Math.random()*9;
-  }
-}
-
-// Spin crystal crowns + orbit their ring of six orbs around each pylon.
-function updateLobbyPylons(dt){
-  const t = gs.time;
-  if(gs.pylonCrystals){
-    for(const c of gs.pylonCrystals){
-      c.rotation.y += dt * 0.9;
-      c.rotation.x += dt * 0.45;
-    }
-  }
-  if(gs.pylonOrbits){
-    for(const orbit of gs.pylonOrbits){
-      const r = 0.38;
-      for(let i = 0; i < orbit.orbs.length; i++){
-        const a = t * 0.9 + i * (Math.PI * 2 / orbit.orbs.length);
-        orbit.orbs[i].position.set(
-          orbit.cx + Math.cos(a) * r,
-          orbit.cy + Math.sin(t * 1.4 + i) * 0.08,
-          orbit.cz + Math.sin(a) * r
-        );
-      }
-    }
   }
 }
 
@@ -10078,7 +9954,6 @@ function loop(){
     updateFlickerLights(dt);
     updateLobbyChandelier(dt);
     updateLobbyCircle(dt);
-    updateLobbyPylons(dt);
     updateDualRealitySigns(dt);
     updateHiddenReveals(dt);
     updateCreepChair(dt);
