@@ -1603,7 +1603,7 @@ function buildLevel(){
   }
 
   // Rooms
-  const lobbyRoom = addRoom('Lobby', 0,0, 24,24, 10.5);   // cathedral-tall lobby for the chandelier
+  const lobbyRoom = addRoom('Lobby', 0,0, 24,24, 7.5);   // tall lobby (chandelier room)
   addRoom('Server Hall A', 40,0, 32,26, 6.0);
   addRoom('Substation', -40,0, 28,22);
   addRoom('Cooling Tower 03', 0,34, 28,28);
@@ -1626,51 +1626,34 @@ function buildLevel(){
   // (they're visible highlights, not dark masses). The coffered
   // texture itself carries the panel-and-beam look.
   if(lobbyRoom && lobbyRoom.ceil){
-    // EXPERIMENT 2: the material-swap test failed ("still flat black"),
-    // so rebuild the ceiling mesh from scratch — destroy the old one,
-    // add a fresh bright plane at the same position. Also drop several
-    // large bright debug spheres at different heights in the lobby so
-    // we can tell whether ANY mesh above eye level is visible to the
-    // player. If the user sees the spheres but not the ceiling: mesh
-    // size/position issue. If they see neither: view frustum or
-    // rendering problem.
+    // Diagnostic confirmed: the 10.5m ceiling was physically there but
+    // rendered too dimly (emissive + tone-mapping + distance) to read
+    // from the floor — the player saw "flat black." The bright
+    // MeshBasicMaterial plane test proved the mesh & swap were fine.
+    //
+    // Final fix: drop ceiling height from 10.5 to 7.5m (still tall,
+    // still reads as cathedral, but close enough to be unambiguously
+    // visible), and use MeshBasicMaterial with the coffered-panel
+    // texture so the ceiling's color is lighting-independent. The
+    // fixtures still contribute via their volumetric cones and by
+    // lighting the coffer trim/bosses.
     scene.remove(lobbyRoom.ceil);
     const lobbyCeilMat = new THREE.MeshBasicMaterial({
-      color: 0x3dff88, side: THREE.DoubleSide, fog: false
+      map: makeLobbyCeilTex(),
+      side: THREE.DoubleSide
     });
-    // Drop down from y=10.5 to y=6 for the experiment — if the old
-    // y=10.5 ceiling was somehow unreachable (frustum, fog, whatever),
-    // this lower position is definitely in view from the floor.
     const newCeil = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.2, 23.8), lobbyCeilMat);
-    newCeil.position.set(0, 6.0, 0);
+    newCeil.position.set(0, 7.5, 0);
     scene.add(newCeil);
     lobbyRoom.ceil = newCeil;
 
-    // Sanity spheres — four ultra-bright balls at increasing heights
-    // above the lobby center. Should be obviously visible from the floor.
-    const sphereMat = new THREE.MeshBasicMaterial({
-      color: 0xff00ff, fog: false     // magenta — stands out against any ceiling color
-    });
-    for(const sy of [3.0, 5.0, 7.0, 9.0]){
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), sphereMat);
-      s.position.set(0, sy, 0);
-      scene.add(s);
-    }
-
-    try {
-      console.log('[lobby] rebuilt ceiling as bright plane at y=6, added magenta debug spheres at y=3/5/7/9');
-    } catch(_){}
-    // Brass trim ribbons along the coffer beam lines — thin, bright,
-    // and self-emissive so they read as decorative metalwork on the
-    // ceiling instead of dark structural beams occluding the view.
-    // Hung 0.12m below the ceiling bottom (y=10.28) with tiny thickness
-    // so at any viewing angle they occupy almost no vertical extent of
-    // the view and never read as a "black top."
+    // Brass trim ribbons along the coffer beam lines — thin + self-
+    // emissive so they read as metalwork, not dark beams.
     const trimMat = new THREE.MeshStandardMaterial({
       color: 0xc9a548, metalness: 0.95, roughness: 0.22,
       emissive: 0x8a6820, emissiveIntensity: 1.0
     });
-    const trimY = 10.33;
+    const trimY = 7.33;
     const trimPositions = [-11.9, -5.95, 0, 5.95, 11.9];
     for(const bz of trimPositions){
       const bm = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.04, 0.08), trimMat);
@@ -1682,8 +1665,7 @@ function buildLevel(){
       bm.position.set(bx, trimY, 0);
       scene.add(bm);
     }
-    // Brass bosses at each intersection — visible medallions that
-    // double as soft warm spotlights.
+    // Brass bosses at each intersection — visible medallions.
     const bossMat = new THREE.MeshStandardMaterial({
       color: 0xf5d078, metalness: 0.9, roughness: 0.25,
       emissive: 0xa87830, emissiveIntensity: 1.2
@@ -1692,7 +1674,7 @@ function buildLevel(){
       for(const bz of trimPositions){
         const boss = new THREE.Mesh(
           new THREE.CylinderGeometry(0.3, 0.24, 0.1, 20), bossMat);
-        boss.position.set(bx, 10.28, bz);
+        boss.position.set(bx, 7.28, bz);
         scene.add(boss);
       }
     }
@@ -1701,12 +1683,12 @@ function buildLevel(){
   // Lobby walls with gaps toward corridors. South wall is SEALED — the
   // Community Development corridor is cut in this build, so the lobby
   // south wall is now solid (OLAM signage hangs on it from the inside).
-  // Walls are 10.5m tall to match the raised lobby ceiling so the
-  // skybox isn't visible above the wall tops.
-  addWallWithGap('x', 12, -12, 12, 0, 6, 10.5);   // north wall: gap → Corr N
-  addWall(-12, -12, 12, -12, 10.5);               // south wall: SEALED
-  addWallWithGap('z', 12, -12, 12, 0, 6, 10.5);   // east wall:  gap → Corr E
-  addWallWithGap('z', -12, -12, 12, 0, 6, 10.5);  // west wall:  gap → Corr W
+  // Walls are 7.5m tall to match the lobby ceiling so the skybox
+  // isn't visible above the wall tops.
+  addWallWithGap('x', 12, -12, 12, 0, 6, 7.5);    // north wall: gap → Corr N
+  addWall(-12, -12, 12, -12, 7.5);                // south wall: SEALED
+  addWallWithGap('z', 12, -12, 12, 0, 6, 7.5);    // east wall:  gap → Corr E
+  addWallWithGap('z', -12, -12, 12, 0, 6, 7.5);   // west wall:  gap → Corr W
   // Lintels above each lobby corridor doorway — seal the vertical void
   // between the (shorter) corridor ceiling and the raised lobby ceiling.
   //
@@ -1724,18 +1706,18 @@ function buildLevel(){
   const lobbyLintelMat = new THREE.MeshStandardMaterial({
     color:0x1a2520, roughness:0.7, metalness:0.25
   });
-  // Corr N — corridor ceiling bottom y=4.3, lobby ceiling bottom y=10.4.
-  // Lintel y=4.3..10.4 (6.1m tall, center 7.35), thickness 0.2m in z
-  // (wall plane z=12), 5.8m wide in x (z-inset 0.1 each side of the 6m gap).
-  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(5.8, 6.1, 0.2), lobbyLintelMat);
-  lintelN.position.set(0, 7.35, 12); scene.add(lintelN);
-  // Corr W — same 4.3..10.4 span, 0.2m thick in x at wall plane x=-12.
-  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.2, 6.1, 5.8), lobbyLintelMat);
-  lintelW.position.set(-12, 7.35, 0); scene.add(lintelW);
+  // Corr N — corridor ceiling bottom y=4.3, lobby ceiling bottom y=7.4.
+  // Lintel y=4.3..7.4 (3.1m tall, center 5.85), in wall plane z=12,
+  // 5.8m wide in x (z-inset 0.1 each side of the 6m gap).
+  const lintelN = new THREE.Mesh(new THREE.BoxGeometry(5.8, 3.1, 0.2), lobbyLintelMat);
+  lintelN.position.set(0, 5.85, 12); scene.add(lintelN);
+  // Corr W — same 4.3..7.4 span, 0.2m thick in x at wall plane x=-12.
+  const lintelW = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3.1, 5.8), lobbyLintelMat);
+  lintelW.position.set(-12, 5.85, 0); scene.add(lintelW);
   // Corr E — corridor ceiling bottom y=5.9 (ceilingY=6.0), lobby ceiling
-  // bottom y=10.4. Lintel y=5.9..10.4, 4.5m tall, center 8.15.
-  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.5, 5.8), lobbyLintelMat);
-  lintelE.position.set(12, 8.15, 0); scene.add(lintelE);
+  // bottom y=7.4. Lintel y=5.9..7.4, 1.5m tall, center 6.65.
+  const lintelE = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.5, 5.8), lobbyLintelMat);
+  lintelE.position.set(12, 6.65, 0); scene.add(lintelE);
 
   // Server hall (taller — accommodates the catwalk and head clearance)
   addWallWithGap('z', 24, -13, 13, 0, 6, 6.0);
@@ -3143,26 +3125,22 @@ function decorateLobby(){
   gs.dualSigns = { cover:[logo, sub], truth:[truthLogo, truthSub] };
   addPlant(-8, 0, -8);
   addPlant(8, 0, -8);
-  // Cathedral lobby (10.5m ceiling) — ambient ceiling lights sit just
-  // under the ceiling mesh. Intensities bumped ~30% from the previous
-  // 9m tuning so the lobby doesn't read as dark at the new height.
+  // Lobby (7.5m ceiling) — ambient ceiling lights just under the
+  // ceiling mesh. Intensities sized for the 7.5m height.
   const lobbyCeilLights = [
-    addCeilLight(0, 10.2, -6, 0xbfe6c6, 1.6, 44),  // over spawn approach
-    addCeilLight(-8, 10.2, 6, 0x8ee39c, 0.8, 28),
-    addCeilLight(8, 10.2, 6, 0x8ee39c, 0.8, 28),
+    addCeilLight(0, 7.2, -6, 0xbfe6c6, 1.4, 34),  // over spawn approach
+    addCeilLight(-8, 7.2, 6, 0x8ee39c, 0.7, 24),
+    addCeilLight(8, 7.2, 6, 0x8ee39c, 0.7, 24),
   ];
   // The default addCeilLight() creates a short 3.2m volumetric cone —
   // in a normal 4.4m-ceiling room it hangs down to about head height
-  // and reads as a shaft of light. In a 10.5m lobby those cones sit
-  // stranded up near the ceiling. Stretch each cone down so it's
-  // visible all the way to the floor — sells the cathedral height.
-  // Cone opacity ~30% higher (0.18 → 0.23) so the light shafts are
-  // more visible and the room reads brighter overall.
+  // and reads as a shaft of light. Stretch each cone to reach the
+  // floor from the 7.5m ceiling.
   for(const f of lobbyCeilLights){
     if(!f.cone) continue;
     scene.remove(f.cone);
-    const grow = 9.5;                           // cone height (10.5m ceiling)
-    const coneGeo = new THREE.ConeGeometry(2.6, grow, 20, 1, true);
+    const grow = 6.5;                           // cone height (7.5m ceiling)
+    const coneGeo = new THREE.ConeGeometry(2.2, grow, 20, 1, true);
     const coneTex = (()=>{
       const c=document.createElement('canvas'); c.width=32; c.height=128;
       const g=c.getContext('2d');
@@ -3201,7 +3179,7 @@ function decorateLobbyCenterpiece(){
   // across the floor. The floor inlay is the marble disc AROUND that
   // hub; the tree branches emerge from under it.
   const cx = 0, cz = 0;
-  const ceilY = 10.4;       // matches the cathedral lobby ceiling (10.5 - 0.1)
+  const ceilY = 7.4;        // matches the lobby ceiling (7.5 - 0.1)
 
   // ---- POLISHED FLOOR INLAY ----
   // A black-marble disc with brass mandala etching sits flush with the
@@ -7968,8 +7946,8 @@ function ceilingAt(x, z){
   if(z < -43) return 999;
   // Building A has a taller ceiling to accommodate the catwalk
   if(x >= 24 && x <= 56 && z >= -13 && z <= 13) return 6.0;
-  // Lobby is a cathedral — 10.5m ceiling (mesh bottom at 10.4)
-  if(x >= -12 && x <= 12 && z >= -12 && z <= 12) return 10.4;
+  // Lobby ceiling at 7.5m (mesh bottom at 7.4)
+  if(x >= -12 && x <= 12 && z >= -12 && z <= 12) return 7.4;
   return 4.3; // interior default (ceiling mesh bottom)
 }
 
