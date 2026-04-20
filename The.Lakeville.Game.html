@@ -1632,39 +1632,14 @@ function buildLevel(){
     // itself is occluded by something we haven't noticed yet, because
     // MeshBasicMaterial at max color with tone mapping and fog
     // disabled is physically incapable of rendering black.
-    // TEST: solid bright green, no texture. If this doesn't show,
-    // something structural is wrong (occlusion or mesh not in scene).
+    // Swap in the coffered lobby ceiling texture. Now that the
+    // roofCap is out of the way at y=9, this actually renders.
     lobbyRoom.ceil.material = new THREE.MeshBasicMaterial({
-      color: 0x3dff88,
+      map: makeLobbyCeilTex(),
       side: THREE.DoubleSide,
       fog: false,
       toneMapped: false
     });
-    try {
-      console.log('[lobby ceiling test]',
-                  'pos:', lobbyRoom.ceil.position.toArray(),
-                  'visible:', lobbyRoom.ceil.visible,
-                  'parent:', lobbyRoom.ceil.parent && lobbyRoom.ceil.parent.type,
-                  'in scene:', scene.children.includes(lobbyRoom.ceil));
-    } catch(_){}
-    // Diagnostic reference — a bright red sphere floating 1.5m below
-    // where the ceiling bottom should be. If the player can see THIS
-    // but not the green ceiling, the ceiling mesh is being occluded
-    // by something at exactly that height. If they can't see either,
-    // some wider problem (fog, clip plane, etc.) is eating meshes
-    // above ~y=6.
-    const redRef = new THREE.Mesh(
-      new THREE.SphereGeometry(0.8, 20, 14),
-      new THREE.MeshBasicMaterial({ color: 0xff2244, fog: false, toneMapped: false })
-    );
-    redRef.position.set(0, 6.0, 0);
-    scene.add(redRef);
-    const yellowRef = new THREE.Mesh(
-      new THREE.SphereGeometry(0.8, 20, 14),
-      new THREE.MeshBasicMaterial({ color: 0xffee33, fog: false, toneMapped: false })
-    );
-    yellowRef.position.set(0, 7.2, 0);
-    scene.add(yellowRef);
 
     // Brass trim ribbons along the coffer beam lines.
     const trimMat = new THREE.MeshStandardMaterial({
@@ -9515,12 +9490,18 @@ function init(){
 
   // Interior roof cap — seals any ceiling gap above walls/lintels without
   // covering the outdoor receptor zone (z < -43 stays open to sky).
+  // MUST sit above every room ceiling: lobby 7.5m is the tallest, so
+  // 9.0m gives the coffered ceiling 1.5m of clearance. Historical bug:
+  // this was at y=6.5 from back when the lobby ceiling was 6.5m, which
+  // meant it was literally hanging below the raised lobby ceiling
+  // and rendering as the mysterious "black top" occluding everything
+  // above ~y=6.5, including the lobby ceiling itself.
   const roofCap = new THREE.Mesh(
     new THREE.PlaneGeometry(150, 120),
     new THREE.MeshBasicMaterial({color:0x05090a, side:THREE.DoubleSide, fog:false})
   );
   roofCap.rotation.x = Math.PI/2;
-  roofCap.position.set(0, 6.5, 16);   // center: z from -44 to 76
+  roofCap.position.set(0, 9.0, 16);   // center: z from -44 to 76
   scene.add(roofCap);
 
   camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 400);
