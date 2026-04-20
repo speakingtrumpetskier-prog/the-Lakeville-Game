@@ -1626,13 +1626,20 @@ function buildLevel(){
   // (they're visible highlights, not dark masses). The coffered
   // texture itself carries the panel-and-beam look.
   if(lobbyRoom && lobbyRoom.ceil){
-    const lobbyCeilMat = new THREE.MeshStandardMaterial({
-      map: makeLobbyCeilTex(),
-      roughness: 0.6, metalness: 0.2,
-      emissive: new THREE.Color(0x4a7a5c),
-      emissiveIntensity: 1.6
+    // EXPERIMENT: unambiguously bright, lighting-independent material so
+    // we can confirm whether the ceiling mesh even reaches the camera.
+    // MeshBasicMaterial ignores lights entirely and renders at solid
+    // color — if the ceiling STILL looks like a flat black plane with
+    // this applied, the mesh is being occluded (or the material swap
+    // isn't landing), not a lighting/emissive problem.
+    const lobbyCeilMat = new THREE.MeshBasicMaterial({
+      color: 0x3dff88,    // searing neon green — impossible to miss
+      side: THREE.DoubleSide,
+      fog: false          // skip fog dampening for this experiment
     });
     lobbyRoom.ceil.material = lobbyCeilMat;
+    // Also log to confirm the swap actually happened at build time.
+    try { console.log('[lobby] ceiling material swapped to experimental bright', lobbyRoom.ceil); } catch(_){}
     // Brass trim ribbons along the coffer beam lines — thin, bright,
     // and self-emissive so they read as decorative metalwork on the
     // ceiling instead of dark structural beams occluding the view.
