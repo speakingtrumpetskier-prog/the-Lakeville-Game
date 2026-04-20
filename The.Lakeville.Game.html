@@ -1832,6 +1832,7 @@ function buildLevel(){
   decorateCooling();
   // decorateOffice() — cut: Community Development room removed.
   decorateFilingRoom();
+  initBossTrap();
 
   // Locked filing door
   const lockGeo = new THREE.BoxGeometry(6, 4.4, 0.4);
@@ -4617,27 +4618,9 @@ function substationSpawnInspector(){
     antennaTip.position.y = 3.1; e.mesh.add(antennaTip);
     e.antennaTip = antennaTip;
 
-    // Override-key badge on the chest — glowing keyring + teeth, rotating
-    const key = new THREE.Group();
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.04, 8, 18),
-      new THREE.MeshBasicMaterial({color:0xfff0a0}));
-    ring.rotation.x = Math.PI/2; key.add(ring);
-    const stem = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.32, 0.04),
-      new THREE.MeshBasicMaterial({color:0xfff0a0}));
-    stem.position.y = -0.22; key.add(stem);
-    const tooth1 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.04),
-      new THREE.MeshBasicMaterial({color:0xfff0a0}));
-    tooth1.position.set(0.05, -0.34, 0); key.add(tooth1);
-    const tooth2 = tooth1.clone(); tooth2.position.set(0.06, -0.30, 0); key.add(tooth2);
-    key.position.set(0, 1.45, 0.7);
-    e.mesh.add(key);
-    e.keyBadge = key;
-    // Accent halo behind the key for readability
-    const keyHalo = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.3, 16),
-      new THREE.MeshBasicMaterial({color:0xfff0a0, transparent:true, opacity:0.45,
-        side:THREE.DoubleSide}));
-    keyHalo.position.set(0, 1.45, 0.69);
-    e.mesh.add(keyHalo);
+    // (Override-key badge cut — the substation sprinklers/fire sequence
+    // is what actually unlocks the filing door, so the inspector doesn't
+    // need to pretend to be carrying a key.)
     // Inspector point light (pale cyan, faint)
     const pl = new THREE.PointLight(0x60c8ff, 1.2, 5);
     pl.position.y = 1.8; e.mesh.add(pl);
@@ -4676,11 +4659,7 @@ function updateSubstationTrap(dt){
         substationSpawnInspector();
       }
     }
-    // Inspector key bob/spin (readable hint that this enemy is special)
-    if(trap.inspector && trap.inspector.alive && trap.inspector.keyBadge){
-      trap.inspector.keyBadge.rotation.y += dt * 3;
-      trap.inspector.keyBadge.position.y = 2.8 + Math.sin(gs.time * 2.2) * 0.18;
-    }
+    // (Inspector key bob/spin removed with the key badge itself.)
     // Inspector death → 10-second phased resolution (fire → alarm →
     // sprinklers → flicker → free). Enters 'resolving' state; the
     // block below drives the timeline.
@@ -6125,11 +6104,17 @@ function decorateFilingRoom(){
   }
 
   // Gavel on the bench
+  // Gavel — handle + head aligned on the same axis so they read as a
+  // single object. Previously the handle was tilted (z rotation π/2.3)
+  // and the head was flat (z rotation π/2), with subtle y/z offsets,
+  // which left a ~10cm visible gap between the two pieces.
   const gavelHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.35, 8), medWoodMat);
-  gavelHandle.position.set(1.4, 1.82, 65.1); gavelHandle.rotation.z = Math.PI/2.3;
+  gavelHandle.position.set(1.4, 1.82, 65.1); gavelHandle.rotation.z = Math.PI/2;
   scene.add(gavelHandle);
   const gavelHead = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.22, 12), medWoodMat);
-  gavelHead.position.set(1.62, 1.88, 65.05); gavelHead.rotation.z = Math.PI/2;
+  // Handle spans x = 1.225..1.575; head's left edge must meet 1.575.
+  // Head is 0.22m long horizontally → center at 1.575 + 0.11 = 1.685.
+  gavelHead.position.set(1.685, 1.82, 65.1); gavelHead.rotation.z = Math.PI/2;
   scene.add(gavelHead);
   // Gavel gold band
   const gBand = new THREE.Mesh(new THREE.TorusGeometry(0.085, 0.01, 6, 16), goldMat);
@@ -6216,16 +6201,13 @@ function decorateFilingRoom(){
   podiumTrim.rotation.x = -0.25;
   scene.add(podiumTrim);
   gs.walls.push({minX:-0.75, maxX:0.75, minZ:60.75, maxZ:62.25});
-  // Downlight glow above podium
+  // Downlight glow above podium.
+  // (Previously had a floating 0.45m gold halo ring at y=2.7 as a
+  // "visible hanging marker" — cut; it read as a visual glitch
+  // floating under the real chandelier rather than as ornament.)
   const depositGlow = new THREE.PointLight(0xfff0c0, 1.6, 8);
   depositGlow.position.set(0, 3.0, 61.5);
   scene.add(depositGlow);
-  // Gold halo ring below the glow (visible hanging marker)
-  const halo = new THREE.Mesh(
-    new THREE.TorusGeometry(0.45, 0.025, 8, 28), goldMat);
-  halo.position.set(0, 2.7, 61.5);
-  halo.rotation.x = Math.PI/2;
-  scene.add(halo);
 
   // ---- GALLERY PEWS (south) ----
   // Each row is split into LEFT and RIGHT pews with a 2m central
@@ -7784,6 +7766,44 @@ class Enemy {
   // puffs, irregular on/off opacity flickers that get emptier over time,
   // then disappear. No tilt, no sink, no expanding ring.
   _updateDeathAnim(dt){
+    // Turret: shut down in place, don't disappear. One-time darkening
+    // + a slight downward tilt of the head so the mount reads as
+    // "destroyed equipment" rather than "removed from scene." No
+    // flicker, no fade, no mesh removal.
+    if(this.type === 'turret'){
+      if(!this._turretShutdown){
+        this._turretShutdown = true;
+        // Dim everything visible on the turret.
+        this.mesh.traverse(o => {
+          if(o.isPointLight){ o.intensity = 0; }
+          if(o.material){
+            if(o.material.emissiveIntensity !== undefined){
+              o.material.emissiveIntensity = 0;
+            }
+            if(o.material.isMeshBasicMaterial && o.material.color){
+              if(o.material._deathStartColor === undefined){
+                o.material._deathStartColor = o.material.color.clone();
+              }
+              // Dark grey — still visible, but clearly 'off.'
+              o.material.color.setRGB(0.05, 0.05, 0.05);
+            }
+          }
+        });
+        // Droop the head forward a bit so the kill reads.
+        if(this.head){
+          this.head.rotation.x = 0.45;
+        }
+        // Add the chassis bounds to the wall list so the player
+        // can't walk through the wreck.
+        gs.walls.push({
+          minX: this.pos.x - 0.85, maxX: this.pos.x + 0.85,
+          minZ: this.pos.z - 0.85, maxZ: this.pos.z + 0.85
+        });
+      }
+      // Keep mesh anchored in place — no further animation.
+      this.mesh.position.copy(this.pos);
+      return;
+    }
     // Inspector: stays put as a visible corpse for the whole 10-second
     // substation resolution sequence. The trap's 'resolving' block
     // handles fire/smoke above it and finally removes the mesh when
@@ -8549,7 +8569,16 @@ function collectPickup(pu){
     if(pu.key === 'grid')  triggerCatwalkPowerDown();
     if(pu.key === 'water') triggerCoolingWindDown();
     if(allEvidence() && !gs.bossSpawned){
-      spawnBoss();
+      // Boss spawn is now a multi-phase lobby trap (see updateBossTrap).
+      // Arm it and point the player back to the lobby — the actual
+      // spawn + swell + music cue fires only after they return and the
+      // laser-bar drop/escalation sequence plays out.
+      if(gs.bossTrap){
+        gs.bossTrap.armed = true;
+        setObjective('Return to the lobby — file the administrative record.');
+      } else {
+        spawnBoss();
+      }
     } else if(!allEvidence()){
       updateObjectiveFromEvidence();
     }
@@ -8613,6 +8642,244 @@ function spawnBoss(){
   showToast('COMPLIANCE ENGINE ENGAGED', 'The AUAR Integrity Monitor has identified you.');
   setObjective('Disable the Compliance Engine (lobby) to unlock the records annex.');
   bumpAlert(1.0);
+}
+
+// ============================================================
+// BOSS TRAP — grand entrance sequence for the Compliance Engine.
+// Sequence (triggered when player re-enters the lobby after all
+// three exhibits are secured):
+//   dormant      → waiting for the arm + player-in-lobby condition
+//   weirdLights  → 3s of lobby fixtures flickering/dimming
+//   barsDrop     → red laser bars fall across all 3 lobby↔corridor
+//                  doorways, trapping the player in the lobby
+//   orbSpawn     → small purple orb appears in the cooling yard
+//   orbFloat     → orb drifts south through Corr N into the lobby,
+//                  passing through the laser bars unharmed
+//   orbArrive    → orb pauses at lobby center
+//   orbSwell     → orb scales up to full boss size
+//   bossFight    → spawnBoss() called; music/alert cue fires here
+// ============================================================
+function initBossTrap(){
+  const barMat = new THREE.MeshStandardMaterial({
+    color: 0x5a0808, metalness: 0.9, roughness: 0.3,
+    emissive: 0xff2010, emissiveIntensity: 0.9
+  });
+  const bars = [];
+
+  // Helper — build a 6-vertical + 3-horizontal grille across one
+  // lobby doorway. `axis` tells us whether the gap runs along x
+  // (Corr N doorway) or z (Corr W / Corr E).
+  function buildDoorBars(doorway){
+    const hidden = 10.0;
+    const positions = [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5];
+    for(const p of positions){
+      let x = doorway.x, z = doorway.z;
+      if(doorway.axis === 'x') x += p; else z += p;
+      const bar = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.1, 0.1, 5.5, 10), barMat);
+      bar.position.set(x, hidden, z);
+      scene.add(bar);
+      bars.push({ mesh: bar, hiddenY: hidden, targetY: 2.75, dropStart: 0 });
+    }
+    for(const by of [0.8, 2.5, 4.2]){
+      const cross = new THREE.Mesh(
+        new THREE.BoxGeometry(
+          doorway.axis === 'x' ? 6.0 : 0.12,
+          0.12,
+          doorway.axis === 'x' ? 0.12 : 6.0),
+        barMat);
+      cross.position.set(doorway.x, hidden + by*0.01, doorway.z);
+      scene.add(cross);
+      bars.push({ mesh: cross, hiddenY: hidden + by*0.01, targetY: by, dropStart: 0 });
+    }
+  }
+
+  buildDoorBars({ x: 0,   z: 12, axis: 'x' });   // Corr N  (wall z=12)
+  buildDoorBars({ x: -12, z: 0,  axis: 'z' });   // Corr W  (wall x=-12)
+  buildDoorBars({ x: 12,  z: 0,  axis: 'z' });   // Corr E  (wall x=12)
+
+  gs.bossTrap = {
+    state: 'dormant',
+    stateT: 0,
+    armed: false,
+    bars,
+    corridorColliders: [
+      { minX: -3.1,   maxX: 3.1,    minZ: 11.85, maxZ: 12.15 },   // Corr N
+      { minX: -12.15, maxX: -11.85, minZ: -3.1,  maxZ: 3.1  },    // Corr W
+      { minX: 11.85,  maxX: 12.15,  minZ: -3.1,  maxZ: 3.1  }     // Corr E
+    ],
+    orb: null,
+    orbLight: null
+  };
+}
+
+function updateBossTrap(dt){
+  const bt = gs.bossTrap;
+  if(!bt) return;
+  bt.stateT += dt;
+
+  // Bar drop animation — runs alongside whatever state we're in.
+  for(const b of bt.bars){
+    if(b.dropStart > 0){
+      const t = Math.min(1, (gs.time - b.dropStart) / 0.5);
+      const ease = t < 0.82 ? (t/0.82) : 1 - 0.08*Math.sin((t-0.82)/0.18 * Math.PI);
+      b.mesh.position.y = b.hiddenY - (b.hiddenY - b.targetY) * ease;
+    }
+  }
+
+  // Orb wobble (applied in states where it's visible).
+  if(bt.orb && (bt.state === 'orbSpawn' || bt.state === 'orbFloat' ||
+                 bt.state === 'orbArrive' || bt.state === 'orbSwell')){
+    bt.orb.rotation.y += dt * 1.8;
+  }
+
+  if(bt.state === 'dormant'){
+    if(bt.armed && !gs.bossSpawned){
+      const p = gs.player.pos;
+      // Require player to be firmly inside the lobby footprint.
+      if(p.x > -11 && p.x < 11 && p.z > -11 && p.z < 11){
+        bt.state = 'weirdLights';
+        bt.stateT = 0;
+        audio.sentinelVoice();
+        setObjective('Something is wrong.');
+      }
+    }
+    return;
+  }
+
+  if(bt.state === 'weirdLights'){
+    // Flicker all lobby ceiling fixtures (those positioned high in the
+    // lobby). Escalates: gentle flicker first ~1.5s, violent drops next.
+    const k = bt.stateT / 3.0;
+    if(gs.allCeilLights){
+      for(const fx of gs.allCeilLights){
+        if(!fx.light) continue;
+        if(fx.light.position.y < 6) continue;   // lobby only
+        const rnd = Math.random();
+        const baseDim = 1 - k * 0.5;
+        const spike = (k > 0.5 && rnd < 0.25) ? (rnd < 0.1 ? 0.1 : 1.4) : 1.0;
+        fx.light.intensity = fx.base * baseDim * spike;
+      }
+    }
+    if(bt.stateT >= 3.0){
+      bt.state = 'barsDrop';
+      bt.stateT = 0;
+      for(const b of bt.bars){ b.dropStart = gs.time; }
+      for(const c of bt.corridorColliders){ gs.walls.push(c); }
+      audio.tone({ freq: 140, dur: 0.7, type: 'sawtooth', vol: 0.3 });
+      audio.tone({ freq: 90,  dur: 1.0, type: 'sawtooth', vol: 0.25 });
+      shake(0.6);
+      triggerNetworkBlood(3.0);
+      // Restore lobby lights to base (they'll stay dim during the
+      // rest of the sequence from the fight intensity bump later).
+      if(gs.allCeilLights){
+        for(const fx of gs.allCeilLights){
+          if(fx.light && fx.light.position.y > 6) fx.light.intensity = fx.base;
+        }
+      }
+    }
+    return;
+  }
+
+  if(bt.state === 'barsDrop'){
+    // Let the drop settle (~0.8s) before spawning the orb.
+    if(bt.stateT >= 0.9){
+      bt.state = 'orbSpawn';
+      bt.stateT = 0;
+      const orb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.18, 16, 12),
+        new THREE.MeshBasicMaterial({
+          color: 0xff60ff, fog: false, toneMapped: false
+        }));
+      orb.position.set(0, 3.0, 34);    // cooling yard center
+      scene.add(orb);
+      bt.orb = orb;
+      const orbLight = new THREE.PointLight(0xff40c0, 1.8, 8);
+      orbLight.position.copy(orb.position);
+      scene.add(orbLight);
+      bt.orbLight = orbLight;
+      audio.sentinelVoice();
+    }
+    return;
+  }
+
+  if(bt.state === 'orbSpawn'){
+    // Hover for a beat so the player can notice the orb.
+    bt.orb.position.set(
+      Math.sin(bt.stateT * 3) * 0.08,
+      3.0 + Math.sin(bt.stateT * 4) * 0.06,
+      34
+    );
+    bt.orbLight.position.copy(bt.orb.position);
+    if(bt.stateT >= 1.3){
+      bt.state = 'orbFloat';
+      bt.stateT = 0;
+    }
+    return;
+  }
+
+  if(bt.state === 'orbFloat'){
+    // Path: cooling yard (0, 3.0, 34) → lobby center (0, 2.5, 0).
+    // Passes straight through the lobby north laser bars unharmed.
+    const dur = 5.0;
+    const t = Math.min(1, bt.stateT / dur);
+    const easeT = t * t * (3 - 2 * t);
+    const zNow = 34 + (0 - 34) * easeT;
+    const yNow = 3.0 + (2.5 - 3.0) * easeT;
+    bt.orb.position.set(
+      Math.sin(bt.stateT * 4) * 0.1,
+      yNow + Math.sin(bt.stateT * 6) * 0.05,
+      zNow
+    );
+    bt.orbLight.position.copy(bt.orb.position);
+    if(t >= 1){
+      bt.state = 'orbArrive';
+      bt.stateT = 0;
+    }
+    return;
+  }
+
+  if(bt.state === 'orbArrive'){
+    // Pause at lobby center — 1.2s of ominous hover.
+    bt.orb.position.set(
+      Math.sin(bt.stateT * 3) * 0.06,
+      2.5 + Math.sin(bt.stateT * 5) * 0.04,
+      0
+    );
+    bt.orbLight.position.copy(bt.orb.position);
+    if(bt.stateT >= 1.2){
+      bt.state = 'orbSwell';
+      bt.stateT = 0;
+      audio.tone({ freq: 60, dur: 1.6, type: 'sawtooth', vol: 0.4 });
+      shake(0.35);
+    }
+    return;
+  }
+
+  if(bt.state === 'orbSwell'){
+    // Scale up from 0.18m radius → ~2.2m radius (11x) over 1.4s.
+    const dur = 1.4;
+    const t = Math.min(1, bt.stateT / dur);
+    const easeT = t * t * (3 - 2 * t);
+    const scale = 1 + (11 - 1) * easeT;
+    bt.orb.scale.setScalar(scale);
+    bt.orbLight.intensity = 1.8 + easeT * 3.5;
+    bt.orbLight.distance = 8 + easeT * 12;
+    if(t >= 1){
+      bt.state = 'bossFight';
+      bt.stateT = 0;
+      scene.remove(bt.orb);
+      scene.remove(bt.orbLight);
+      bt.orb = null;
+      bt.orbLight = null;
+      // Hand off to the existing spawnBoss — which creates the actual
+      // Enemy, cues the music/alert, and sets the "disable Engine"
+      // objective. Happens here, at the moment the boss reveals its
+      // full form, so the music cue lands on the transformation.
+      spawnBoss();
+    }
+    return;
+  }
 }
 function openFilingDoor(){
   const d = gs.doors.find(x=>x.kind==='filing');
@@ -9950,6 +10217,7 @@ function loop(){
     updateCorridorFigureEvent(dt);
     updateRoomTracking();       // every frame — music/network follow pink/orange boundaries
     updateSubstationTrap(dt);
+    updateBossTrap(dt);
     updateCatwalkPowerDown(dt);
     updateCatwalkKeeperPulse(dt);
     updateCoolingAutomaton(dt);
