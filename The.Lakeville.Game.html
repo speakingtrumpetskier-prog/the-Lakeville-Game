@@ -1626,31 +1626,47 @@ function buildLevel(){
   // (they're visible highlights, not dark masses). The coffered
   // texture itself carries the panel-and-beam look.
   if(lobbyRoom && lobbyRoom.ceil){
-    // Diagnostic confirmed: the 10.5m ceiling was physically there but
-    // rendered too dimly (emissive + tone-mapping + distance) to read
-    // from the floor — the player saw "flat black." The bright
-    // MeshBasicMaterial plane test proved the mesh & swap were fine.
-    //
-    // Final fix: drop ceiling height from 10.5 to 7.5m (still tall,
-    // still reads as cathedral, but close enough to be unambiguously
-    // visible), and use MeshBasicMaterial with the coffered-panel
-    // texture so the ceiling's color is lighting-independent. The
-    // fixtures still contribute via their volumetric cones and by
-    // lighting the coffer trim/bosses.
-    scene.remove(lobbyRoom.ceil);
-    const lobbyCeilMat = new THREE.MeshBasicMaterial({
-      map: makeLobbyCeilTex(),
+    // Simplest possible test path: swap the material on the EXISTING
+    // ceiling mesh in place (don't remove, don't rebuild). Solid
+    // bright color first — if THIS renders black, the ceiling mesh
+    // itself is occluded by something we haven't noticed yet, because
+    // MeshBasicMaterial at max color with tone mapping and fog
+    // disabled is physically incapable of rendering black.
+    // TEST: solid bright green, no texture. If this doesn't show,
+    // something structural is wrong (occlusion or mesh not in scene).
+    lobbyRoom.ceil.material = new THREE.MeshBasicMaterial({
+      color: 0x3dff88,
       side: THREE.DoubleSide,
-      fog: false,       // fog at distant corners was dimming the ceiling
-      toneMapped: false // and ACES tone mapping was also eating brightness
+      fog: false,
+      toneMapped: false
     });
-    const newCeil = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.2, 23.8), lobbyCeilMat);
-    newCeil.position.set(0, 7.5, 0);
-    scene.add(newCeil);
-    lobbyRoom.ceil = newCeil;
+    try {
+      console.log('[lobby ceiling test]',
+                  'pos:', lobbyRoom.ceil.position.toArray(),
+                  'visible:', lobbyRoom.ceil.visible,
+                  'parent:', lobbyRoom.ceil.parent && lobbyRoom.ceil.parent.type,
+                  'in scene:', scene.children.includes(lobbyRoom.ceil));
+    } catch(_){}
+    // Diagnostic reference — a bright red sphere floating 1.5m below
+    // where the ceiling bottom should be. If the player can see THIS
+    // but not the green ceiling, the ceiling mesh is being occluded
+    // by something at exactly that height. If they can't see either,
+    // some wider problem (fog, clip plane, etc.) is eating meshes
+    // above ~y=6.
+    const redRef = new THREE.Mesh(
+      new THREE.SphereGeometry(0.8, 20, 14),
+      new THREE.MeshBasicMaterial({ color: 0xff2244, fog: false, toneMapped: false })
+    );
+    redRef.position.set(0, 6.0, 0);
+    scene.add(redRef);
+    const yellowRef = new THREE.Mesh(
+      new THREE.SphereGeometry(0.8, 20, 14),
+      new THREE.MeshBasicMaterial({ color: 0xffee33, fog: false, toneMapped: false })
+    );
+    yellowRef.position.set(0, 7.2, 0);
+    scene.add(yellowRef);
 
-    // Brass trim ribbons along the coffer beam lines — thin + self-
-    // emissive so they read as metalwork, not dark beams.
+    // Brass trim ribbons along the coffer beam lines.
     const trimMat = new THREE.MeshStandardMaterial({
       color: 0xc9a548, metalness: 0.95, roughness: 0.22,
       emissive: 0x8a6820, emissiveIntensity: 1.0
@@ -1667,7 +1683,7 @@ function buildLevel(){
       bm.position.set(bx, trimY, 0);
       scene.add(bm);
     }
-    // Brass bosses at each intersection — visible medallions.
+    // Brass bosses at each intersection.
     const bossMat = new THREE.MeshStandardMaterial({
       color: 0xf5d078, metalness: 0.9, roughness: 0.25,
       emissive: 0xa87830, emissiveIntensity: 1.2
