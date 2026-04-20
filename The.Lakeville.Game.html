@@ -1626,20 +1626,40 @@ function buildLevel(){
   // (they're visible highlights, not dark masses). The coffered
   // texture itself carries the panel-and-beam look.
   if(lobbyRoom && lobbyRoom.ceil){
-    // EXPERIMENT: unambiguously bright, lighting-independent material so
-    // we can confirm whether the ceiling mesh even reaches the camera.
-    // MeshBasicMaterial ignores lights entirely and renders at solid
-    // color — if the ceiling STILL looks like a flat black plane with
-    // this applied, the mesh is being occluded (or the material swap
-    // isn't landing), not a lighting/emissive problem.
+    // EXPERIMENT 2: the material-swap test failed ("still flat black"),
+    // so rebuild the ceiling mesh from scratch — destroy the old one,
+    // add a fresh bright plane at the same position. Also drop several
+    // large bright debug spheres at different heights in the lobby so
+    // we can tell whether ANY mesh above eye level is visible to the
+    // player. If the user sees the spheres but not the ceiling: mesh
+    // size/position issue. If they see neither: view frustum or
+    // rendering problem.
+    scene.remove(lobbyRoom.ceil);
     const lobbyCeilMat = new THREE.MeshBasicMaterial({
-      color: 0x3dff88,    // searing neon green — impossible to miss
-      side: THREE.DoubleSide,
-      fog: false          // skip fog dampening for this experiment
+      color: 0x3dff88, side: THREE.DoubleSide, fog: false
     });
-    lobbyRoom.ceil.material = lobbyCeilMat;
-    // Also log to confirm the swap actually happened at build time.
-    try { console.log('[lobby] ceiling material swapped to experimental bright', lobbyRoom.ceil); } catch(_){}
+    // Drop down from y=10.5 to y=6 for the experiment — if the old
+    // y=10.5 ceiling was somehow unreachable (frustum, fog, whatever),
+    // this lower position is definitely in view from the floor.
+    const newCeil = new THREE.Mesh(new THREE.BoxGeometry(23.8, 0.2, 23.8), lobbyCeilMat);
+    newCeil.position.set(0, 6.0, 0);
+    scene.add(newCeil);
+    lobbyRoom.ceil = newCeil;
+
+    // Sanity spheres — four ultra-bright balls at increasing heights
+    // above the lobby center. Should be obviously visible from the floor.
+    const sphereMat = new THREE.MeshBasicMaterial({
+      color: 0xff00ff, fog: false     // magenta — stands out against any ceiling color
+    });
+    for(const sy of [3.0, 5.0, 7.0, 9.0]){
+      const s = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12), sphereMat);
+      s.position.set(0, sy, 0);
+      scene.add(s);
+    }
+
+    try {
+      console.log('[lobby] rebuilt ceiling as bright plane at y=6, added magenta debug spheres at y=3/5/7/9');
+    } catch(_){}
     // Brass trim ribbons along the coffer beam lines — thin, bright,
     // and self-emissive so they read as decorative metalwork on the
     // ceiling instead of dark structural beams occluding the view.
