@@ -2844,16 +2844,15 @@ function makeTileCeilTex(){
 // ceiling needs to be legibly brighter and have real coffered structure
 // so the player can see what's up there from the floor.
 function makeLobbyCeilTex(){
-  // MeshBasicMaterial renders the texture pixel values DIRECTLY (no
-  // lighting), so every tone here lands on screen unchanged. The
-  // previous pass used rgb 26–130 (shadow range) and read as dark.
-  // This pass uses mid-to-high luminance greens + saturated brass
-  // accents so the coffered pattern is legibly present from the floor.
+  // Coffered lobby ceiling — now tuned down to sit closer to the
+  // other rooms' dim tile ceiling, while keeping the pattern legible.
+  // MeshBasicMaterial renders the pixel values DIRECTLY so these
+  // colors land on screen unchanged.
   const size = 1024;
   const c = document.createElement('canvas'); c.width = c.height = size;
   const g = c.getContext('2d');
-  // Brass-green beam color between panels (visible grid lines).
-  g.fillStyle = '#7a6a3a';
+  // Dark olive beam color between panels.
+  g.fillStyle = '#2e2e22';
   g.fillRect(0, 0, size, size);
   const cells = 4;
   const cell = size / cells;
@@ -2863,60 +2862,50 @@ function makeLobbyCeilTex(){
       const beam = cell * 0.14;
       const innerX = px + beam, innerY = py + beam;
       const innerS = cell - 2*beam;
-      // Panel gradient — BRIGHT mint-green center fading to mid-green
-      // edge. All tones in the mid-range so they read clearly on screen.
+      // Panel radial gradient — muted sage greens.
       const grad = g.createRadialGradient(
         innerX + innerS/2, innerY + innerS/2, innerS*0.1,
         innerX + innerS/2, innerY + innerS/2, innerS*0.7
       );
-      grad.addColorStop(0,    '#cce8c8');    // panel center — bright light green
-      grad.addColorStop(0.55, '#9ec8a4');    // mid
-      grad.addColorStop(1,    '#6d9074');    // edge — still visibly green
+      grad.addColorStop(0,    '#6d9074');    // panel center — medium sage
+      grad.addColorStop(0.55, '#506e58');
+      grad.addColorStop(1,    '#384a3e');    // edge
       g.fillStyle = grad;
       g.fillRect(innerX, innerY, innerS, innerS);
-      // Top-left shadow + bottom-right highlight for inset relief.
-      g.fillStyle = 'rgba(10,16,12,0.45)';
-      g.fillRect(innerX, innerY, innerS, 3);
-      g.fillRect(innerX, innerY, 3, innerS);
-      g.fillStyle = 'rgba(240,255,240,0.45)';
+      // Inset relief — subtle shadow + highlight.
+      g.fillStyle = 'rgba(10,16,12,0.5)';
+      g.fillRect(innerX, innerY, innerS, 2);
+      g.fillRect(innerX, innerY, 2, innerS);
+      g.fillStyle = 'rgba(180,210,186,0.25)';
       g.fillRect(innerX, innerY + innerS - 2, innerS, 2);
       g.fillRect(innerX + innerS - 2, innerY, 2, innerS);
-      // Bright brass rosette + 4 decorative petals.
+      // Small muted brass rosette (was gold; now antique bronze).
       const cx = innerX + innerS/2, cy = innerY + innerS/2;
-      const rosR = innerS * 0.12;
+      const rosR = innerS * 0.09;
       const rosGrad = g.createRadialGradient(cx, cy, 0, cx, cy, rosR);
-      rosGrad.addColorStop(0,    '#fff4b0');
-      rosGrad.addColorStop(0.45, '#f0c468');
-      rosGrad.addColorStop(1,    'rgba(160,120,50,0)');
+      rosGrad.addColorStop(0,    '#b89240');
+      rosGrad.addColorStop(0.55, '#7a6224');
+      rosGrad.addColorStop(1,    'rgba(120,90,40,0)');
       g.fillStyle = rosGrad;
       g.beginPath(); g.arc(cx, cy, rosR, 0, Math.PI*2); g.fill();
-      g.fillStyle = '#fff8d0';
+      g.fillStyle = '#d4a858';
       g.beginPath(); g.arc(cx, cy, rosR*0.3, 0, Math.PI*2); g.fill();
-      g.strokeStyle = 'rgba(208,164,82,0.85)';
-      g.lineWidth = 3;
-      for(let a = 0; a < 4; a++){
-        const angle = a * Math.PI/2 + Math.PI/4;
-        g.beginPath();
-        g.moveTo(cx + Math.cos(angle)*rosR*0.9, cy + Math.sin(angle)*rosR*0.9);
-        g.lineTo(cx + Math.cos(angle)*rosR*2.2, cy + Math.sin(angle)*rosR*2.2);
-        g.stroke();
-      }
     }
   }
-  // Thick, bright brass trim down every beam line (reads at distance).
-  g.strokeStyle = '#e0b458';
-  g.lineWidth = 5;
+  // Thin antique-brass trim down each beam line.
+  g.strokeStyle = '#7a6224';
+  g.lineWidth = 3;
   for(let i = 0; i <= cells; i++){
     const p = i * cell;
     g.beginPath(); g.moveTo(p, 0); g.lineTo(p, size); g.stroke();
     g.beginPath(); g.moveTo(0, p); g.lineTo(size, p); g.stroke();
   }
-  // Gold cap dots at trim intersections.
-  g.fillStyle = '#fff6c8';
+  // Small dim cap dots at trim intersections.
+  g.fillStyle = '#9a7a32';
   for(let ti = 0; ti <= cells; ti++){
     for(let tj = 0; tj <= cells; tj++){
       g.beginPath();
-      g.arc(ti*cell, tj*cell, 6, 0, Math.PI*2);
+      g.arc(ti*cell, tj*cell, 4, 0, Math.PI*2);
       g.fill();
     }
   }
@@ -2924,9 +2913,6 @@ function makeLobbyCeilTex(){
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(1, 1);
   tex.anisotropy = 8;
-  // Canvas values are painted as sRGB (perceptual) — explicitly tagging
-  // the texture as SRGBColorSpace prevents the renderer from treating
-  // them as linear, which was turning bright pixel values dim on output.
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
@@ -3333,7 +3319,11 @@ function decorateLobbyCenterpiece(){
     color: 0xd8f3dc, transparent: true, opacity: 0.85
   });
 
-  const pylonH   = 4.8;
+  // Pillar is dimensioned to meet the ceiling bottom at y=7.4:
+  //   plinth 0.32m + shaft pylonH + capital stack 0.24m = 7.4m
+  //   → pylonH = 6.84.
+  // The capital's top brass+frame layer sits flush with the ceiling.
+  const pylonH   = 6.84;
   const plinthH  = 0.32;
   const shaftCy  = plinthH + pylonH/2;
 
@@ -3355,26 +3345,27 @@ function decorateLobbyCenterpiece(){
       new THREE.BoxGeometry(0.95, pylonH, 0.95), pylonShaftMat);
     shaft.position.set(px, shaftCy, pylonCz); scene.add(shaft);
 
-    // Capital — tiered cornice with a brass stripe.
+    // Capital — tiered cornice with a brass stripe, flush to ceiling.
+    // capBot spans 0.10m tall centered at plinthH+pylonH+0.05 →
+    //   y = (plinthH+pylonH)..(plinthH+pylonH+0.10) = 7.16..7.26
     const capBot = new THREE.Mesh(
       new THREE.BoxGeometry(1.15, 0.10, 1.15), pylonFrameMat);
     capBot.position.set(px, plinthH + pylonH + 0.05, pylonCz); scene.add(capBot);
+    // capBrass 0.06m tall centered at plinthH+pylonH+0.13 → 7.26..7.32
     const capBrass = new THREE.Mesh(
       new THREE.BoxGeometry(1.22, 0.06, 1.22), brassMat);
     capBrass.position.set(px, plinthH + pylonH + 0.13, pylonCz); scene.add(capBrass);
+    // capTop 0.08m tall centered at plinthH+pylonH+0.20 → 7.32..7.40
+    // (flush with the lobby ceiling bottom — no more lamp on top)
     const capTop = new THREE.Mesh(
-      new THREE.BoxGeometry(1.05, 0.08, 1.05), pylonFrameMat);
+      new THREE.BoxGeometry(1.08, 0.08, 1.08), pylonFrameMat);
     capTop.position.set(px, plinthH + pylonH + 0.20, pylonCz); scene.add(capTop);
 
-    // Small recessed dome lamp on top — warm glow, matches the
-    // lobby's ambient palette. No animation.
-    const lamp = new THREE.Mesh(
-      new THREE.SphereGeometry(0.18, 16, 10, 0, Math.PI*2, 0, Math.PI/2),
-      topLightMat);
-    lamp.position.set(px, plinthH + pylonH + 0.26, pylonCz);
-    scene.add(lamp);
+    // Warm point light tucked up at the capital height — same feel
+    // as the old top lamp but no visible fixture clashing with the
+    // ceiling. Provides the local glow on the capital trim.
     const lampPt = new THREE.PointLight(0xd8f3dc, 0.55, 4.5);
-    lampPt.position.set(px, plinthH + pylonH + 0.32, pylonCz);
+    lampPt.position.set(px, plinthH + pylonH - 0.1, pylonCz);
     scene.add(lampPt);
 
     // Collision.
