@@ -7750,6 +7750,7 @@ class Enemy {
       gs.showVictoryPath = true;
       openFilingDoor();
       triggerVictoryLightshow();
+      releaseBossTrapBars();    // retract the three corridor laser grilles
       setObjective('Deposit all four exhibits in the records annex (north of cooling).');
       showToast('COMPLIANCE ENGINE OFFLINE', 'Records annex unlocked.');
       audio.victory();
@@ -8713,17 +8714,97 @@ function initBossTrap(){
   };
 }
 
+// Lobby-fixture erratic flicker. Per-fixture stepped random intensity
+// with occasional near-black cuts and color shifts to red/blue so the
+// room feels hostile and unpredictable (not ramping/escalating —
+// steady-state chaos). Stops when the caller resets each fixture.
+function applyLobbyFlicker(dt, chaos){
+  if(!gs.allCeilLights) return;
+  for(const fx of gs.allCeilLights){
+    if(!fx.light || fx.light.position.y < 6) continue;   // lobby only
+    if(fx._flickHold === undefined){
+      fx._flickHold = 0;
+      fx._flickMult = 0.6;
+      fx._flickColor = fx.light.color.getHex();
+      fx._origColor  = fx.baseColor ? fx.baseColor.getHex() : fx._flickColor;
+    }
+    fx._flickHold -= dt;
+    if(fx._flickHold <= 0){
+      // Pick a new state. Step changes are stepped, not per-frame,
+      // so you get discrete jumps rather than a smooth modulation.
+      const r = Math.random();
+      let mult = 0.55 + Math.random()*0.35;
+      let col  = fx._origColor;
+      if(r < 0.10 * chaos)      { mult = 0.03; }                                  // hard cut to black
+      else if(r < 0.18 * chaos) { mult = 1.8 + Math.random()*0.9; }                // blinding overshoot
+      else if(r < 0.24 * chaos) { mult = 0.25; col = 0xff2030; }                   // sickly red
+      else if(r < 0.30 * chaos) { mult = 0.35; col = 0x4060ff; }                   // cold blue
+      else if(r < 0.45 * chaos) { mult = 0.15 + Math.random()*0.25; }              // deep dim
+      fx._flickMult = mult;
+      fx._flickColor = col;
+      // Random hold duration — short bursts (40-180ms) most of the
+      // time, occasional sticky holds (up to ~600ms). Never steady.
+      const holdBase = 0.04 + Math.random() * 0.14;
+      const stickyRoll = Math.random();
+      fx._flickHold = stickyRoll < 0.12 ? (0.3 + Math.random()*0.3) : holdBase;
+    }
+    fx.light.intensity = fx.base * fx._flickMult;
+    if(fx.light.color.getHex() !== fx._flickColor){
+      fx.light.color.setHex(fx._flickColor);
+    }
+  }
+}
+
+// Restore lobby fixtures to their clean baseline (intensity + color).
+function restoreLobbyFlicker(){
+  if(!gs.allCeilLights) return;
+  for(const fx of gs.allCeilLights){
+    if(!fx.light || fx.light.position.y < 6) continue;
+    fx.light.intensity = fx.base;
+    if(fx.baseColor){
+      fx.light.color.copy(fx.baseColor);
+    }
+    fx._flickHold = undefined;   // re-init on next trap run if any
+  }
+}
+
+// Retract the three laser-bar grilles and free the corridor colliders.
+// Called from the boss's die() when the compliance engine is defeated.
+function releaseBossTrapBars(){
+  const bt = gs.bossTrap;
+  if(!bt || bt._released) return;
+  bt._released = true;
+  const now = gs.time;
+  for(const b of bt.bars){
+    b.raiseStart = now;
+    b.dropStart = 0;   // halt any lingering drop interpolation
+  }
+  // Strip the corridor colliders out of gs.walls so the player can
+  // leave the lobby through all three doorways again.
+  if(bt.corridorColliders){
+    for(const c of bt.corridorColliders){
+      const idx = gs.walls.indexOf(c);
+      if(idx >= 0) gs.walls.splice(idx, 1);
+    }
+  }
+  audio.doorOpen && audio.doorOpen();
+}
+
 function updateBossTrap(dt){
   const bt = gs.bossTrap;
   if(!bt) return;
   bt.stateT += dt;
 
-  // Bar drop animation — runs alongside whatever state we're in.
+  // Bar drop + raise animation — runs alongside any state.
   for(const b of bt.bars){
     if(b.dropStart > 0){
       const t = Math.min(1, (gs.time - b.dropStart) / 0.5);
       const ease = t < 0.82 ? (t/0.82) : 1 - 0.08*Math.sin((t-0.82)/0.18 * Math.PI);
       b.mesh.position.y = b.hiddenY - (b.hiddenY - b.targetY) * ease;
+    }
+    if(b.raiseStart){
+      const t = Math.min(1, (gs.time - b.raiseStart) / 0.7);
+      b.mesh.position.y = b.targetY + (b.hiddenY - b.targetY) * t;
     }
   }
 
@@ -8748,19 +8829,11 @@ function updateBossTrap(dt){
   }
 
   if(bt.state === 'weirdLights'){
-    // Flicker all lobby ceiling fixtures (those positioned high in the
-    // lobby). Escalates: gentle flicker first ~1.5s, violent drops next.
-    const k = bt.stateT / 3.0;
-    if(gs.allCeilLights){
-      for(const fx of gs.allCeilLights){
-        if(!fx.light) continue;
-        if(fx.light.position.y < 6) continue;   // lobby only
-        const rnd = Math.random();
-        const baseDim = 1 - k * 0.5;
-        const spike = (k > 0.5 && rnd < 0.25) ? (rnd < 0.1 ? 0.1 : 1.4) : 1.0;
-        fx.light.intensity = fx.base * baseDim * spike;
-      }
-    }
+    // Erratic, offputting flicker — stepped, not escalating. Same
+    // high chaos value throughout so the player gets no sense of
+    // "it's building toward something." Random cuts to black, harsh
+    // red/blue color jumps, sudden blinding flashes.
+    applyLobbyFlicker(dt, 0.9);
     if(bt.stateT >= 3.0){
       bt.state = 'barsDrop';
       bt.stateT = 0;
@@ -8770,18 +8843,14 @@ function updateBossTrap(dt){
       audio.tone({ freq: 90,  dur: 1.0, type: 'sawtooth', vol: 0.25 });
       shake(0.6);
       triggerNetworkBlood(3.0);
-      // Restore lobby lights to base (they'll stay dim during the
-      // rest of the sequence from the fight intensity bump later).
-      if(gs.allCeilLights){
-        for(const fx of gs.allCeilLights){
-          if(fx.light && fx.light.position.y > 6) fx.light.intensity = fx.base;
-        }
-      }
     }
     return;
   }
 
   if(bt.state === 'barsDrop'){
+    // Flicker continues — the lights don't go back to normal just
+    // because the bars dropped.
+    applyLobbyFlicker(dt, 0.85);
     // Let the drop settle (~0.8s) before spawning the orb.
     if(bt.stateT >= 0.9){
       bt.state = 'orbSpawn';
@@ -8804,6 +8873,7 @@ function updateBossTrap(dt){
   }
 
   if(bt.state === 'orbSpawn'){
+    applyLobbyFlicker(dt, 0.8);
     // Hover for a beat so the player can notice the orb.
     bt.orb.position.set(
       Math.sin(bt.stateT * 3) * 0.08,
@@ -8819,8 +8889,10 @@ function updateBossTrap(dt){
   }
 
   if(bt.state === 'orbFloat'){
-    // Path: cooling yard (0, 3.0, 34) → lobby center (0, 2.5, 0).
-    // Passes straight through the lobby north laser bars unharmed.
+    // Flicker pushes HARDER as the orb approaches — more bursts of
+    // red/blue + harder black-cuts. Still not "escalating" in any
+    // predictable way; just denser chaos.
+    applyLobbyFlicker(dt, 1.0);
     const dur = 5.0;
     const t = Math.min(1, bt.stateT / dur);
     const easeT = t * t * (3 - 2 * t);
@@ -8840,7 +8912,7 @@ function updateBossTrap(dt){
   }
 
   if(bt.state === 'orbArrive'){
-    // Pause at lobby center — 1.2s of ominous hover.
+    applyLobbyFlicker(dt, 1.0);
     bt.orb.position.set(
       Math.sin(bt.stateT * 3) * 0.06,
       2.5 + Math.sin(bt.stateT * 5) * 0.04,
@@ -8857,9 +8929,13 @@ function updateBossTrap(dt){
   }
 
   if(bt.state === 'orbSwell'){
-    // Scale up from 0.18m radius → ~2.2m radius (11x) over 1.4s.
+    // As the boss takes form the room STABILIZES — the erratic
+    // flicker gives way to fixed lighting so the fight reads cleanly.
     const dur = 1.4;
     const t = Math.min(1, bt.stateT / dur);
+    // Fade flicker out over the swell (high chaos at start → calm at end).
+    if(t < 0.6) applyLobbyFlicker(dt, 0.9 - t * 0.9);
+    else restoreLobbyFlicker();
     const easeT = t * t * (3 - 2 * t);
     const scale = 1 + (11 - 1) * easeT;
     bt.orb.scale.setScalar(scale);
@@ -8872,6 +8948,7 @@ function updateBossTrap(dt){
       scene.remove(bt.orbLight);
       bt.orb = null;
       bt.orbLight = null;
+      restoreLobbyFlicker();
       // Hand off to the existing spawnBoss — which creates the actual
       // Enemy, cues the music/alert, and sets the "disable Engine"
       // objective. Happens here, at the moment the boss reveals its
