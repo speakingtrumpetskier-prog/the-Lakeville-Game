@@ -8993,38 +8993,47 @@ function updateBossTrap(dt){
   if(bt.state === 'orbFloat'){
     // Flicker keeps its density; the lead-up never goes calm.
     applyLobbyFlicker(dt, 1.0);
-    // Lackadaisical meander. Casual is menacing — instead of a clean
-    // smoothstep from cooling to lobby, the orb wanders: lateral
-    // sway from overlapping non-integer sines (organic-feeling), Y
-    // bobs in a loose range, and Z occasionally backtracks slightly
-    // so you can't predict how fast it's going to reach you.
+    // Lackadaisical meander. Casual is menacing — overlapping
+    // non-integer sines on X, slow Y bobs, and small Z reversals so
+    // the path never tracks as urgent. In the last ~40% of the
+    // float, all the wobble tapers smoothly to zero and the orb
+    // locks onto the landing target (0, 2.2, 0) — the same y the
+    // boss enemy is about to spawn at — so there's no teleport at
+    // the handoff.
     const dur = 9.0;
     const t = Math.min(1, bt.stateT / dur);
-    // Z progression is mostly forward but with small oscillatory
-    // reversals. Sine terms at different phases give the illusion
-    // of the orb "considering" its path.
-    const baseZProg = t * t * (3 - 2 * t);   // underlying smoothstep
-    const zJitter   = Math.sin(bt.stateT * 1.3) * 0.04
-                    + Math.sin(bt.stateT * 2.7 + 0.6) * 0.025;
+    // 'tail' fades from 1 to 0 over t ∈ [0.6, 1] with smoothstep.
+    const tailRaw = Math.max(0, Math.min(1, 1 - (t - 0.6) / 0.4));
+    const tail = tailRaw * tailRaw * (3 - 2 * tailRaw);
+
+    // Z: smoothstep core + tapered oscillatory reversals.
+    const baseZProg = t * t * (3 - 2 * t);
+    const zJitter   = (Math.sin(bt.stateT * 1.3) * 0.04
+                     + Math.sin(bt.stateT * 2.7 + 0.6) * 0.025) * tail;
     const zProg     = Math.max(0, Math.min(1, baseZProg + zJitter));
     const zNow      = 34 + (0 - 34) * zProg;
-    // Lateral drift up to ±1.8m. When the orb is still in the
-    // corridor (|zNow| > 3) x is clamped so it stays in the gap.
-    let xNow = Math.sin(bt.stateT * 0.85) * 1.6
-             + Math.sin(bt.stateT * 2.1 + 0.4) * 0.7
-             + Math.sin(bt.stateT * 0.33) * 0.4;
-    if(zNow > 12 || zNow < -0.5) {
-      // Corridor mouth (z > 12) or narrow approach — keep centered
+
+    // X: lateral wander, tapered to 0 at landing.
+    let xNow = (Math.sin(bt.stateT * 0.85) * 1.6
+              + Math.sin(bt.stateT * 2.1 + 0.4) * 0.7
+              + Math.sin(bt.stateT * 0.33) * 0.4) * tail;
+    if(zNow > 12 || zNow < -0.5){
       const limit = zNow > 12 ? 1.8 : 0;
       if(xNow > limit) xNow = limit;
       if(xNow < -limit) xNow = -limit;
     }
-    // Y bob between ~2.2 and ~3.2 with slow lazy period.
-    const yNow = 2.7 + Math.sin(bt.stateT * 0.9) * 0.45
-                     + Math.cos(bt.stateT * 1.6 + 0.3) * 0.18;
+    // Y: base bob between ~2.6..3.2, but blended toward 2.2 by tail
+    // so the last frame lands exactly at y=2.2.
+    const yWander = 2.7 + Math.sin(bt.stateT * 0.9) * 0.45
+                        + Math.cos(bt.stateT * 1.6 + 0.3) * 0.18;
+    const yNow = 2.2 + (yWander - 2.2) * tail;
+
     bt.orb.position.set(xNow, yNow, zNow);
     bt.orbLight.position.copy(bt.orb.position);
     if(t >= 1){
+      // Snap-safe: tail is 0 so position is already (0, 2.2, 0).
+      bt.orb.position.set(0, 2.2, 0);
+      bt.orbLight.position.copy(bt.orb.position);
       bt.state = 'orbArrive';
       bt.stateT = 0;
     }
@@ -9033,13 +9042,21 @@ function updateBossTrap(dt){
 
   if(bt.state === 'orbArrive'){
     applyLobbyFlicker(dt, 1.0);
+    // Wobble decays to 0 over the full arrive duration so the orb
+    // ends exactly at (0, 2.2, 0) — matches the boss enemy's
+    // spawn position, avoiding the old teleport at handoff.
+    const arriveDur = 1.2;
+    const dK = Math.max(0, Math.min(1, 1 - bt.stateT / arriveDur));
+    const decay = dK * dK;
     bt.orb.position.set(
-      Math.sin(bt.stateT * 3) * 0.06,
-      2.5 + Math.sin(bt.stateT * 5) * 0.04,
+      Math.sin(bt.stateT * 3) * 0.06 * decay,
+      2.2 + Math.sin(bt.stateT * 5) * 0.04 * decay,
       0
     );
     bt.orbLight.position.copy(bt.orb.position);
-    if(bt.stateT >= 1.2){
+    if(bt.stateT >= arriveDur){
+      bt.orb.position.set(0, 2.2, 0);
+      bt.orbLight.position.copy(bt.orb.position);
       bt.state = 'orbSwell';
       bt.stateT = 0;
       audio.tone({ freq: 60, dur: 1.6, type: 'sawtooth', vol: 0.4 });
@@ -9049,13 +9066,15 @@ function updateBossTrap(dt){
   }
 
   if(bt.state === 'orbSwell'){
-    // As the boss takes form the room STABILIZES — the erratic
-    // flicker gives way to fixed lighting so the fight reads cleanly.
+    // As the boss takes form the room STABILIZES — flicker eases to
+    // zero over the first 60% of the swell. Orb stays pinned at
+    // (0, 2.2, 0) so the scale-up happens in place.
     const dur = 1.4;
     const t = Math.min(1, bt.stateT / dur);
-    // Fade flicker out over the swell (high chaos at start → calm at end).
     if(t < 0.6) applyLobbyFlicker(dt, 0.9 - t * 0.9);
     else restoreLobbyFlicker();
+    bt.orb.position.set(0, 2.2, 0);
+    bt.orbLight.position.copy(bt.orb.position);
     const easeT = t * t * (3 - 2 * t);
     const scale = 1 + (11 - 1) * easeT;
     bt.orb.scale.setScalar(scale);
@@ -9069,10 +9088,9 @@ function updateBossTrap(dt){
       bt.orb = null;
       bt.orbLight = null;
       restoreLobbyFlicker();
-      // Hand off to the existing spawnBoss — which creates the actual
-      // Enemy, cues the music/alert, and sets the "disable Engine"
-      // objective. Happens here, at the moment the boss reveals its
-      // full form, so the music cue lands on the transformation.
+      // spawnBoss creates the boss at (0, 2.2, 0) — same spot the
+      // orb was just pinned to, so the handoff reads as a reveal
+      // rather than a teleport.
       spawnBoss();
     }
     return;
