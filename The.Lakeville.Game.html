@@ -300,6 +300,103 @@
     margin-top:12px; }
   .ctrls kbd { color:var(--mcea-accent); }
 
+  /* ---------- control-mode slider on the menu ---------- */
+  .ctrl-slider {
+    display:flex; align-items:center; gap:16px;
+    margin-top:20px;
+    font-family:"Consolas",monospace;
+    font-size:11px; letter-spacing:3px;
+    color:#8fb098;
+    user-select:none;
+  }
+  .ctrl-slider-label {
+    cursor:pointer;
+    transition:color 0.18s, text-shadow 0.18s;
+  }
+  .ctrl-slider-label:hover { color:#cfe9d5; }
+  .ctrl-slider[data-mode="km"] .ctrl-slider-label.left,
+  .ctrl-slider[data-mode="touch"] .ctrl-slider-label.right {
+    color:var(--mcea-accent);
+    text-shadow:0 0 8px rgba(142,227,156,0.55);
+  }
+  .ctrl-slider-track {
+    position:relative;
+    width:72px; height:22px;
+    border:1px solid var(--mcea-green);
+    border-radius:14px;
+    background:rgba(15,32,22,0.55);
+    cursor:pointer;
+    box-shadow:inset 0 0 8px rgba(0,0,0,0.55);
+  }
+  .ctrl-slider-thumb {
+    position:absolute; top:2px; left:2px;
+    width:16px; height:16px; border-radius:50%;
+    background:var(--mcea-accent);
+    box-shadow:0 0 10px rgba(142,227,156,0.7);
+    transition:left 0.22s ease;
+  }
+  .ctrl-slider[data-mode="touch"] .ctrl-slider-thumb { left:52px; }
+
+  /* ---------- touch controls overlay (active only in touch mode) ---------- */
+  #touchControls {
+    position:fixed; inset:0; z-index:4;
+    pointer-events:none;   /* children re-enable as needed */
+    font-family:"Consolas",monospace;
+  }
+  #touchControls.hud-hide { display:none !important; }
+  #touchStickBase {
+    position:absolute; left:34px; bottom:40px;
+    width:150px; height:150px;
+    border:2px solid var(--mcea-accent);
+    border-radius:50%;
+    background:rgba(15,32,22,0.35);
+    box-shadow:0 0 14px rgba(142,227,156,0.22), inset 0 0 12px rgba(0,0,0,0.5);
+    pointer-events:auto;
+    touch-action:none;
+  }
+  #touchStickThumb {
+    position:absolute; top:50%; left:50%;
+    width:62px; height:62px; border-radius:50%;
+    background:rgba(142,227,156,0.35);
+    border:2px solid var(--mcea-accent);
+    transform:translate(-50%, -50%);
+    pointer-events:none;
+  }
+  #touchLookArea {
+    position:absolute; right:0; top:0;
+    width:65%; height:calc(100% - 180px);
+    pointer-events:auto;
+    touch-action:none;
+  }
+  .touch-btn {
+    position:absolute;
+    pointer-events:auto;
+    background:rgba(15,32,22,0.72);
+    border:2px solid var(--mcea-accent);
+    color:var(--mcea-accent);
+    font-family:"Consolas",monospace;
+    font-size:12px; letter-spacing:2px;
+    border-radius:50%;
+    cursor:pointer;
+    touch-action:manipulation;
+    text-shadow:0 0 6px rgba(142,227,156,0.5);
+  }
+  .touch-btn:active { background:rgba(63,178,104,0.6); color:#0c1f16; }
+  .touch-btn.fire {
+    right:28px; bottom:40px;
+    width:98px; height:98px;
+    font-size:14px;
+  }
+  .touch-btn.small {
+    width:54px; height:54px;
+    font-size:16px;
+  }
+  #touchBtnInteract { right:148px; bottom:58px; }
+  #touchBtnFlash    { right:148px; bottom:120px; }
+  #touchBtnJump     { right:148px; bottom:182px; }
+  #touchBtnPause    { right:22px;  top:22px;     width:40px; height:40px; font-size:14px; }
+  #touchBtnCharge   { right:28px;  bottom:152px; width:64px; height:64px; font-size:11px; }
+
   #loader {
     position:fixed; inset:0; z-index:40;
     display:flex; align-items:center; justify-content:center;
@@ -426,7 +523,14 @@
   <div class="minline">— DAKOTA COUNTY · PENDING —</div>
   <div class="caserow"><span class="dot"></span>LIVE · 2.5 MGD · 152 ACRES · RECEPTORS WITHIN 1 MI</div>
   <button class="btn" id="startBtn">ENTER THE RECORD</button>
-  <div class="small">WASD · MOUSE · E · F · SHIFT · SPACE</div>
+  <div id="controlModeSlider" class="ctrl-slider" data-mode="km">
+    <span class="ctrl-slider-label left"  data-mode="km">MOUSE · KEYBOARD</span>
+    <div class="ctrl-slider-track" id="ctrlSliderTrack">
+      <div class="ctrl-slider-thumb" id="ctrlSliderThumb"></div>
+    </div>
+    <span class="ctrl-slider-label right" data-mode="touch">TOUCHSCREEN</span>
+  </div>
+  <div class="small" id="menuControlHint">WASD · ARROWS · MOUSE · E · F · SHIFT · SPACE</div>
 </div>
 
 <div id="gameover" class="screen hud-hide">
@@ -448,6 +552,17 @@
 <div id="pauseOverlay">
   PAUSED
   <div class="hint">CLICK TO RESUME &middot; ESC AGAIN TO QUIT TO MENU</div>
+</div>
+
+<div id="touchControls" class="hud-hide">
+  <div id="touchStickBase"><div id="touchStickThumb"></div></div>
+  <div id="touchLookArea"></div>
+  <button class="touch-btn fire" id="touchBtnFire">FIRE</button>
+  <button class="touch-btn small" id="touchBtnCharge">CHRG</button>
+  <button class="touch-btn small" id="touchBtnInteract">E</button>
+  <button class="touch-btn small" id="touchBtnFlash">F</button>
+  <button class="touch-btn small" id="touchBtnJump">↑</button>
+  <button class="touch-btn"       id="touchBtnPause">‖</button>
 </div>
 
 <div id="docModal">
@@ -505,7 +620,10 @@ let audio;
 const input = {
   keys:new Set(), mx:0, my:0, lock:false,
   firing:false, charging:false, chargeLevel:0,
-  flashlight:true, interact:false
+  flashlight:true, interact:false,
+  // 'km' = mouse + keyboard (WASD or arrows). 'touch' = on-screen
+  // virtual joystick + look area + buttons. Selected on the menu.
+  mode:'km'
 };
 
 // Runtime state
@@ -8089,10 +8207,11 @@ function updatePlayer(dt){
   p.pitch = Math.max(-Math.PI/2+0.05, Math.min(Math.PI/2-0.05, p.pitch));
   input.mx = 0; input.my = 0;
 
-  const fwd = input.keys.has('KeyW') ? 1 : 0;
-  const back = input.keys.has('KeyS') ? 1 : 0;
-  const left = input.keys.has('KeyA') ? 1 : 0;
-  const right = input.keys.has('KeyD') ? 1 : 0;
+  // Movement accepts WASD and arrow keys interchangeably.
+  const fwd   = (input.keys.has('KeyW') || input.keys.has('ArrowUp'))    ? 1 : 0;
+  const back  = (input.keys.has('KeyS') || input.keys.has('ArrowDown'))  ? 1 : 0;
+  const left  = (input.keys.has('KeyA') || input.keys.has('ArrowLeft'))  ? 1 : 0;
+  const right = (input.keys.has('KeyD') || input.keys.has('ArrowRight')) ? 1 : 0;
   const sprint = input.keys.has('ShiftLeft') || input.keys.has('ShiftRight');
   p.sprinting = sprint && fwd && p.hp>20;
   const speed = WALK_SPEED * (p.sprinting ? SPRINT_MULT : 1);
@@ -10048,7 +10167,10 @@ function init(){
     if((e.code==='ShiftLeft' || e.code==='ShiftRight') && gs.phase==='playing'){
       input.firing = true;
     }
-    if(['KeyW','KeyA','KeyS','KeyD','Space'].includes(e.code)) e.preventDefault();
+    if([
+      'KeyW','KeyA','KeyS','KeyD','Space',
+      'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'
+    ].includes(e.code)) e.preventDefault();
   });
   addEventListener('keyup', e=>{
     input.keys.delete(e.code);
@@ -10079,6 +10201,9 @@ function init(){
   });
   addEventListener('contextmenu', e=>e.preventDefault());
   document.addEventListener('pointerlockchange', ()=>{
+    // In touch mode we never use pointer lock; input.lock is driven
+    // manually and we must not pause on lock changes.
+    if(input.mode === 'touch') return;
     input.lock = document.pointerLockElement === renderer.domElement;
     if(gs.phase==='playing' && !input.lock){ pauseGame(); }
   });
@@ -10095,10 +10220,217 @@ function init(){
   pauseOverlay.onclick = ()=>resumeGame();
   loader.style.display='none';
 
+  setupControlModeSlider();
+  setupTouchControls();
+
   animateMenuCanvas();
 
   clock = new THREE.Clock();
   requestAnimationFrame(loop);
+}
+
+/* ============================================================
+   CONTROL-MODE SLIDER + TOUCH CONTROLS
+   ============================================================ */
+function setupControlModeSlider(){
+  const slider     = $('controlModeSlider');
+  const track      = $('ctrlSliderTrack');
+  const leftLabel  = slider.querySelector('.ctrl-slider-label.left');
+  const rightLabel = slider.querySelector('.ctrl-slider-label.right');
+  const hint       = $('menuControlHint');
+
+  // Persist the last choice between sessions.
+  const saved = (()=>{
+    try { return localStorage.getItem('lakeville.controlMode'); }
+    catch(_){ return null; }
+  })();
+  // Auto-detect touch-primary devices on first run so mobile visitors
+  // don't have to find the slider before their controls work.
+  const prefersTouch = !saved && ('ontouchstart' in window) &&
+    matchMedia('(pointer: coarse)').matches;
+  setControlMode(saved === 'touch' || prefersTouch ? 'touch' : 'km');
+
+  function setControlMode(mode){
+    input.mode = mode;
+    slider.setAttribute('data-mode', mode);
+    try { localStorage.setItem('lakeville.controlMode', mode); } catch(_){}
+    if(hint){
+      hint.textContent = mode === 'touch'
+        ? 'LEFT STICK · LOOK · FIRE · E · F · ↑ · ‖ PAUSE'
+        : 'WASD · ARROWS · MOUSE · E · F · SHIFT · SPACE';
+    }
+  }
+
+  track.addEventListener('click', ()=>{
+    setControlMode(input.mode === 'km' ? 'touch' : 'km');
+  });
+  leftLabel.addEventListener('click',  ()=> setControlMode('km'));
+  rightLabel.addEventListener('click', ()=> setControlMode('touch'));
+
+  // Drag support on the thumb so the slider feels like a slider.
+  const thumb = $('ctrlSliderThumb');
+  let dragging = false;
+  const beginDrag = (e)=>{
+    dragging = true;
+    e.preventDefault();
+  };
+  const moveDrag = (e)=>{
+    if(!dragging) return;
+    const rect = track.getBoundingClientRect();
+    const px = (e.touches ? e.touches[0].clientX : e.clientX);
+    const rel = (px - rect.left) / rect.width;
+    setControlMode(rel < 0.5 ? 'km' : 'touch');
+  };
+  const endDrag = ()=>{ dragging = false; };
+  thumb.addEventListener('mousedown',  beginDrag);
+  thumb.addEventListener('touchstart', beginDrag, {passive:false});
+  addEventListener('mousemove', moveDrag);
+  addEventListener('touchmove', moveDrag, {passive:false});
+  addEventListener('mouseup',   endDrag);
+  addEventListener('touchend',  endDrag);
+}
+
+function setupTouchControls(){
+  const base       = $('touchStickBase');
+  const thumb      = $('touchStickThumb');
+  const lookArea   = $('touchLookArea');
+  const fireBtn    = $('touchBtnFire');
+  const chargeBtn  = $('touchBtnCharge');
+  const intBtn     = $('touchBtnInteract');
+  const flashBtn   = $('touchBtnFlash');
+  const jumpBtn    = $('touchBtnJump');
+  const pauseBtn   = $('touchBtnPause');
+
+  // ---- Virtual joystick ----
+  let stickId = null;
+  const resetStick = ()=>{
+    thumb.style.transform = 'translate(-50%, -50%)';
+    input.keys.delete('KeyW'); input.keys.delete('KeyS');
+    input.keys.delete('KeyA'); input.keys.delete('KeyD');
+    input.keys.delete('ShiftLeft');
+  };
+  const updateStick = (touch)=>{
+    const r = base.getBoundingClientRect();
+    const cx = r.left + r.width/2;
+    const cy = r.top  + r.height/2;
+    const maxR = r.width/2 - 22;
+    let dx = touch.clientX - cx;
+    let dy = touch.clientY - cy;
+    const d = Math.hypot(dx, dy);
+    if(d > maxR){
+      dx = dx / d * maxR;
+      dy = dy / d * maxR;
+    }
+    thumb.style.transform =
+      `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    // Map stick offset to movement keys. Threshold ~30% of max so
+    // small drift doesn't produce constant crawl.
+    const th = maxR * 0.3;
+    input.keys.delete('KeyW'); input.keys.delete('KeyS');
+    input.keys.delete('KeyA'); input.keys.delete('KeyD');
+    if(dy < -th) input.keys.add('KeyW');
+    if(dy >  th) input.keys.add('KeyS');
+    if(dx < -th) input.keys.add('KeyA');
+    if(dx >  th) input.keys.add('KeyD');
+    // Sprint when stick is pushed fully forward.
+    if(dy < -maxR * 0.8) input.keys.add('ShiftLeft');
+    else input.keys.delete('ShiftLeft');
+  };
+  base.addEventListener('touchstart', (e)=>{
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    stickId = t.identifier;
+    updateStick(t);
+  }, {passive:false});
+  base.addEventListener('touchmove', (e)=>{
+    e.preventDefault();
+    for(const t of e.changedTouches){
+      if(t.identifier === stickId) updateStick(t);
+    }
+  }, {passive:false});
+  const stickEnd = (e)=>{
+    for(const t of e.changedTouches){
+      if(t.identifier === stickId){
+        stickId = null;
+        resetStick();
+      }
+    }
+  };
+  base.addEventListener('touchend',    stickEnd);
+  base.addEventListener('touchcancel', stickEnd);
+
+  // ---- Look area (swipe to rotate camera) ----
+  let lookId = null, lookX = 0, lookY = 0;
+  const LOOK_SENS = 1.6;   // scale drag pixels → mouse-equivalent delta
+  lookArea.addEventListener('touchstart', (e)=>{
+    e.preventDefault();
+    if(lookId !== null) return;
+    const t = e.changedTouches[0];
+    lookId = t.identifier;
+    lookX = t.clientX; lookY = t.clientY;
+  }, {passive:false});
+  lookArea.addEventListener('touchmove', (e)=>{
+    e.preventDefault();
+    for(const t of e.changedTouches){
+      if(t.identifier === lookId){
+        input.mx += (t.clientX - lookX) * LOOK_SENS;
+        input.my += (t.clientY - lookY) * LOOK_SENS;
+        lookX = t.clientX; lookY = t.clientY;
+      }
+    }
+  }, {passive:false});
+  const lookEnd = (e)=>{
+    for(const t of e.changedTouches){
+      if(t.identifier === lookId) lookId = null;
+    }
+  };
+  lookArea.addEventListener('touchend',    lookEnd);
+  lookArea.addEventListener('touchcancel', lookEnd);
+
+  // ---- Action buttons ----
+  // Fire: press-and-hold.
+  const pressHold = (btn, onDown, onUp)=>{
+    btn.addEventListener('touchstart', (e)=>{ e.preventDefault(); onDown(); }, {passive:false});
+    btn.addEventListener('touchend',   (e)=>{ e.preventDefault(); if(onUp) onUp(); }, {passive:false});
+    btn.addEventListener('touchcancel',(e)=>{ if(onUp) onUp(); });
+    // Mouse support for desktop testing of touch mode.
+    btn.addEventListener('mousedown', (e)=>{ e.preventDefault(); onDown(); });
+    btn.addEventListener('mouseup',   (e)=>{ e.preventDefault(); if(onUp) onUp(); });
+    btn.addEventListener('mouseleave',()=>{ if(onUp) onUp(); });
+  };
+  pressHold(fireBtn,
+    ()=>{ if(gs.phase==='playing') input.firing = true; },
+    ()=>{ input.firing = false; });
+  pressHold(chargeBtn,
+    ()=>{
+      if(gs.phase!=='playing') return;
+      input.charging = true; input.chargeLevel = 0;
+      $('chargeBar').style.display='block';
+    },
+    ()=>{
+      if(gs.phase==='playing' && input.charging) releaseChargeShot();
+      input.charging = false; input.chargeLevel = 0;
+      $('chargeBar').style.display='none';
+    });
+  // Interact: momentary flag like pressing E once.
+  const tapOnly = (btn, fn)=>{
+    btn.addEventListener('touchstart', (e)=>{ e.preventDefault(); fn(); }, {passive:false});
+    btn.addEventListener('click', (e)=>{ e.preventDefault(); fn(); });
+  };
+  tapOnly(intBtn, ()=>{ input.interact = true; });
+  tapOnly(flashBtn, ()=>{ input.flashlight = !input.flashlight; });
+  tapOnly(jumpBtn, ()=>{
+    input.keys.add('Space');
+    setTimeout(()=> input.keys.delete('Space'), 120);
+  });
+  tapOnly(pauseBtn, ()=>{ togglePause(); });
+}
+
+function showTouchControls(show){
+  const el = $('touchControls');
+  if(!el) return;
+  if(show && input.mode === 'touch') el.classList.remove('hud-hide');
+  else el.classList.add('hud-hide');
 }
 
 /* ============================================================
@@ -10470,7 +10802,12 @@ function startGame(){
   hud.classList.remove('hud-hide');
   gs.phase = 'playing';
   gs.startTime = performance.now();
-  renderer.domElement.requestPointerLock();
+  if(input.mode === 'touch'){
+    showTouchControls(true);
+    input.lock = true;    // stand-in so look updates apply
+  } else {
+    renderer.domElement.requestPointerLock();
+  }
   showToast('SITE ACCESS GAINED',
     '152-acre Olam parcel — Lakeville, MN. Exhibits somewhere inside.');
 }
@@ -10479,13 +10816,22 @@ function pauseGame(){
   if(gs.phase!=='playing') return;
   gs.phase='paused';
   pauseOverlay.style.display='flex';
-  document.exitPointerLock();
+  if(input.mode === 'touch'){
+    showTouchControls(false);
+  } else {
+    document.exitPointerLock();
+  }
 }
 function resumeGame(){
   if(gs.phase!=='paused') return;
   gs.phase='playing';
   pauseOverlay.style.display='none';
-  renderer.domElement.requestPointerLock();
+  if(input.mode === 'touch'){
+    showTouchControls(true);
+    input.lock = true;
+  } else {
+    renderer.domElement.requestPointerLock();
+  }
 }
 function togglePause(){
   if(gs.phase==='playing') pauseGame();
@@ -10497,6 +10843,7 @@ function loseGame(){
   gs.phase='gameover';
   audio.lose();
   document.exitPointerLock();
+  showTouchControls(false);
   hud.classList.add('hud-hide');
   const elapsed = Math.round((performance.now()-gs.startTime)/1000);
   const ev = Object.values(gs.evidence).filter(Boolean).length;
@@ -10511,6 +10858,7 @@ function winGame(){
   gs.phase='victory';
   audio.victory();
   document.exitPointerLock();
+  showTouchControls(false);
   hud.classList.add('hud-hide');
   const elapsed = Math.round((performance.now()-gs.startTime)/1000);
   const surveys = gs.surveyDone || 0;
